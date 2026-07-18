@@ -1,148 +1,112 @@
 # QuickLogin
 
-**Floodgate (Bedrock) + premium Java auto-login for [AuthMeReloaded](https://github.com/AuthMe/AuthMeReloaded).**
-Drag-and-drop, SQLite-backed, and built to be exploit-free.
+**Floodgate (Bedrock) + premium Java auto-login for [AuthMeReloaded](https://github.com/AuthMe/AuthMeReloaded), for Velocity networks.**
 
-QuickLogin lets an **offline-mode** Paper/Spigot server accept everyone —
-cracked Java players, real (paid) Java players, and Bedrock players via
-Geyser/Floodgate — while still auto-logging the trusted ones into AuthMe so
-they never have to type `/login`.
+QuickLogin lets an **offline-mode Velocity network** accept everyone — cracked
+Java players, real (paid) Java players, and Bedrock players via Geyser/Floodgate
+— while auto-logging the trusted ones into AuthMe so they never type `/login`.
 
-- **Premium Java players** are verified directly against Mojang (the full
-  online-mode encryption handshake is performed by the plugin) and logged in
-  automatically.
-- **Bedrock players** (Floodgate) are logged in automatically.
-- **First-time trusted players** are registered in AuthMe with a strong,
-  randomly generated password that is stored in a local SQLite database. They
-  never see or type it — later joins re-use it transparently.
-- **A premium account with an invalid/expired session** is kicked with the
-  *exact same message a cracked client sees on an online-mode server*
-  (`Failed to verify username!` by default), so there is no confusion.
-- **Cracked players** are untouched and go through AuthMe's normal
-  `/register` + `/login` flow.
+It ships as **two plugins** because on a Velocity network the proxy owns the
+login phase, so premium verification *must* happen there — it cannot be done on
+the backend (a backend that tries gets `Backend server is online-mode!` from
+Velocity):
 
----
+| Plugin | Where it goes | Job |
+|--------|---------------|-----|
+| **QuickLogin-Velocity** | the Velocity proxy | Verifies paid accounts by forcing online-mode login for premium names. Cracked/Bedrock fall through as offline. Invalid/expired sessions are kicked by Velocity with the standard "not authenticated with Minecraft.net" prompt. |
+| **QuickLogin-Bukkit** | each Paper/Spigot backend | Auto-logs verified premium + Bedrock players into AuthMe, registering new accounts with a random password stored in SQLite. |
 
 ## How it works
 
-On an offline-mode server nothing normally verifies who a Java player really
-is, so anyone can log in under any name. QuickLogin closes that gap:
+1. A player connects to Velocity (which is in **offline mode**, so cracked and
+   Bedrock players are allowed).
+2. **QuickLogin-Velocity** sees the login-start, asks the **Mojang API directly**
+   whether the name is a paid account, and if so calls `forceOnlineMode()`.
+   Velocity then runs the real Mojang session check. A cracked client using a
+   premium name, or a premium account with an expired session, fails that check
+   and is kicked with the vanilla online-mode prompt — no confusion.
+3. The player is forwarded to the backend. With **modern forwarding**, premium
+   players arrive with their real Mojang UUID (version 4); cracked players get an
+   offline UUID (version 3).
+4. **QuickLogin-Bukkit** classifies each join — Bedrock (Floodgate), premium
+   (v4 UUID), or cracked (v3 UUID) — and for premium/Bedrock players force-logs
+   them into AuthMe, generating and storing a random password in SQLite for
+   brand-new accounts. Cracked players go through AuthMe's normal flow.
 
-1. It intercepts the login-start packet (via **ProtocolLib**).
-2. If the name is a standard Java name, it asks the **Mojang API directly**
-   whether that name is a paid account.
-3. If it is, QuickLogin performs the Mojang encryption handshake itself,
-   verifies the session with `sessionserver.mojang.com/hasJoined`, enables
-   channel encryption, and only then lets the (now trusted) login proceed.
-4. On join, the player is force-logged-into AuthMe — registering them first
-   with a generated password if they are new.
-
-Because the server sits **behind a proxy**, QuickLogin talks to the Mojang API
-**directly** and never sends the client IP to the `hasJoined` endpoint (the
-address the backend sees is the proxy's, and sending it would make Mojang
-reject valid sessions).
-
-### Supported topology
-
-QuickLogin runs the login handshake on the Paper server itself, so it is
-designed for:
-
-- a **standalone offline-mode** Paper/Spigot server, optionally behind a
-  **transparent TCP / anti-DDoS proxy** (e.g. TCPShield) or a Geyser instance
-  on a separate host.
-
-If you run a full **BungeeCord/Velocity** network where the *Minecraft proxy*
-performs the login phase, premium verification has to happen on the proxy
-instead (that is a different kind of plugin). Bedrock + AuthMe auto-login still
-works on the backend regardless.
-
----
+Because the network sits behind a proxy, the Velocity plugin talks to Mojang
+**directly** and never routes through a JVM proxy.
 
 ## Requirements
 
-| Dependency | Required? | Notes |
-|------------|-----------|-------|
-| Paper/Spigot 1.20.1 – 1.21.x | ✅ | Server should be in **offline mode** (`online-mode: false`). |
-| [AuthMeReloaded](https://www.spigotmc.org/resources/authme-reloaded.6269/) | ✅ | The login backend. |
-| [ProtocolLib](https://www.spigotmc.org/resources/protocollib.1997/) | ✅ | Needed for the premium handshake. |
-| [Floodgate](https://geysermc.org/download) | ⛄ optional | Only needed for Bedrock auto-login. |
+| Component | Required? | Notes |
+|-----------|-----------|-------|
+| Velocity 3.3+ or 4.x | ✅ | Proxy in **offline mode** (`online-mode = false` in `velocity.toml`). |
+| Modern forwarding | ✅ | `player-info-forwarding-mode = "modern"` + matching secret on the backends (the standard Velocity + Paper setup). |
+| Paper/Spigot 1.20.1 – 1.21.x backend | ✅ | Backend in offline mode (as Velocity requires). |
+| AuthMeReloaded (backend) | ✅ | The login backend. |
+| Floodgate | ⛄ optional | On the proxy for Bedrock connectivity; on the backend for Bedrock detection. |
 
-SQLite is bundled inside the jar — nothing else to install.
+SQLite is bundled in the backend jar — nothing else to install. Skins on an
+offline network: pair with **SkinsRestorer** as usual.
 
-> **Skins:** premium skins are not applied by QuickLogin. If you want premium
-> skins on an offline server, pair it with **SkinsRestorer** (the usual combo).
+## Installation
 
----
-
-## Installation (drag & drop)
-
-1. Install **AuthMeReloaded** and **ProtocolLib** (and **Floodgate** if you use
-   Bedrock).
-2. Drop `QuickLogin-x.y.z.jar` into `plugins/`.
-3. Make sure the server is in **offline mode** (`server.properties` →
-   `online-mode=false`).
-4. Start the server. That's it — defaults are sane.
-
----
+1. **Proxy:** drop `QuickLogin-Velocity-x.y.z.jar` into Velocity's `plugins/`.
+   Ensure `velocity.toml` has `online-mode = false` and
+   `player-info-forwarding-mode = "modern"`.
+2. **Backends:** install **AuthMeReloaded** + `QuickLogin-Bukkit-x.y.z.jar` in
+   each backend's `plugins/`. (Add Floodgate if you use Bedrock.)
+3. Start the proxy, then the backends. Defaults are sane.
 
 ## Configuration
 
-`plugins/QuickLogin/config.yml`:
+**Proxy** — `plugins/quicklogin/config.properties`:
+
+```properties
+premium-enabled=true          # verify paid accounts (force online-mode login)
+allow-cracked=true            # allow non-premium names as offline players
+bedrock-prefix=.              # names starting with this are treated as Bedrock and skipped
+mojang-request-timeout-ms=5000
+mojang-cache-seconds=300
+debug=false
+```
+
+**Backend** — `plugins/QuickLogin/config.yml`:
 
 ```yaml
 premium:
-  enabled: true                # premium Java auto-login
-  allow-cracked: true          # let non-premium names log in as offline players
-  kick-on-invalid-session: true
-  invalid-session-message: "Failed to verify username!"
-
+  enabled: true               # auto-login players with a Mojang-verified (v4) UUID
 floodgate:
-  enabled: true                # Bedrock auto-login
-  auto-register: true
-
+  enabled: true               # auto-login Bedrock players
 auth:
-  auto-register: true          # register new trusted players automatically
+  auto-register: true         # register new trusted players automatically
   generated-password-length: 32
-
-mojang:
-  request-timeout-ms: 5000
-  cache-seconds: 300
-  worker-threads: 3
-
 database:
   file: "quicklogin.db"
-
 debug: false
 ```
 
-Reload after edits with `/quicklogin reload`.
+Reload the backend with `/quicklogin reload`.
 
----
-
-## Commands & permissions
+## Commands & permissions (backend)
 
 | Command | Description |
 |---------|-------------|
 | `/quicklogin reload` | Reload the configuration. |
 | `/quicklogin status` | Show what's enabled and hooked. |
-| `/quicklogin reset <player>` | Wipe a player's stored credentials + AuthMe account so a fresh password is generated next join. |
+| `/quicklogin reset <player>` | Wipe stored credentials + AuthMe account so a fresh password is generated next join. |
 
 Permission: `quicklogin.admin` (default: OP). Alias: `/ql`.
 
----
-
 ## Security notes
 
-- Premium verification uses the real Mojang session check — a premium name can
-  only get in if the connecting client actually owns that account.
-- Expired/invalid premium sessions are **kicked** by default (configurable),
-  never silently downgraded to cracked.
-- Login usernames are validated (`[A-Za-z0-9_]{3,16}`) before any processing.
-- Generated passwords use `SecureRandom`; the SQLite file is created
-  owner-only on POSIX systems.
-- The plugin never logs passwords, shared secrets, or private keys.
-
----
+- Premium verification uses Velocity's real Mojang session check — a premium
+  name only gets in if the client actually owns that account.
+- Expired/invalid premium sessions are kicked by the proxy, never silently
+  downgraded to cracked.
+- Login usernames are validated (`[A-Za-z0-9_]{3,16}`) before any Mojang call.
+- Generated passwords use `SecureRandom`; the SQLite file is owner-only on POSIX.
+- No passwords, tokens, or keys are ever logged.
 
 ## Building
 
@@ -150,15 +114,13 @@ Permission: `quicklogin.admin` (default: OP). Alias: `/ql`.
 mvn -B package
 ```
 
-The jar lands in `target/QuickLogin-<version>.jar`. Requires JDK 17+.
+Produces `velocity/target/QuickLogin-Velocity-<version>.jar` and
+`bukkit/target/QuickLogin-Bukkit-<version>.jar`. Requires JDK 17+.
 
 ### Automatic builds (GitHub Actions)
 
-Every push and pull request builds the plugin (`.github/workflows/build.yml`)
-and uploads the jar as a workflow artifact. Pushing a tag like `v1.0.0`
-additionally attaches the jar to a GitHub Release.
-
----
+Every push/PR builds both jars and uploads them as workflow artifacts. Pushing a
+`v*` tag attaches both jars to a GitHub Release.
 
 ## License
 

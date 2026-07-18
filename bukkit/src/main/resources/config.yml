@@ -1,0 +1,41 @@
+# =====================================================================
+#  QuickLogin (backend)  -  configuration
+# ---------------------------------------------------------------------
+#  Auto-logs proxy-verified premium players and Bedrock (Floodgate)
+#  players into AuthMeReloaded.
+#
+#  Premium VERIFICATION happens on the Velocity proxy (install the
+#  companion QuickLogin-Velocity plugin there). This backend plugin only
+#  decides who to auto-login, based on the forwarded UUID and Floodgate.
+#
+#  Requires: modern player-info forwarding between Velocity and this
+#  server (the standard Velocity + Paper setup).
+# =====================================================================
+
+config-version: 2
+
+premium:
+  # Auto-login players who arrive with a real (Mojang-verified) UUID.
+  # These are premium accounts the Velocity plugin forced into online mode.
+  enabled: true
+
+floodgate:
+  # Auto-login Bedrock (Floodgate) players into AuthMe on join.
+  enabled: true
+
+auth:
+  # Register brand-new premium/Bedrock players in AuthMe automatically,
+  # using a random generated password stored in SQLite. On later joins the
+  # same stored password is used. Players never run /register or /login.
+  auto-register: true
+
+  # Length of the randomly generated password. These are never typed by a
+  # human, so longer is strictly better.
+  generated-password-length: 32
+
+database:
+  # SQLite file inside the plugin folder.
+  file: "quicklogin.db"
+
+# Verbose logging. Never logs passwords.
+debug: false

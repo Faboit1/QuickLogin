@@ -27,15 +27,24 @@ jobs:
       - name: Build with Maven
         run: mvn -B -ntp package
 
-      - name: Upload plugin jar
+      - name: Upload Velocity plugin jar
         uses: actions/upload-artifact@v4
         with:
-          name: QuickLogin
-          path: target/QuickLogin-*.jar
+          name: QuickLogin-Velocity
+          path: velocity/target/QuickLogin-Velocity-*.jar
           if-no-files-found: error
 
-      - name: Attach jar to release
+      - name: Upload Bukkit plugin jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickLogin-Bukkit
+          path: bukkit/target/QuickLogin-Bukkit-*.jar
+          if-no-files-found: error
+
+      - name: Attach jars to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: target/QuickLogin-*.jar
+          files: |
+            velocity/target/QuickLogin-Velocity-*.jar
+            bukkit/target/QuickLogin-Bukkit-*.jar

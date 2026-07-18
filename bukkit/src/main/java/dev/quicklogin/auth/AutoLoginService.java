@@ -1,7 +1,6 @@
 package dev.quicklogin.auth;
 
 import dev.quicklogin.config.QuickLoginConfig;
-import dev.quicklogin.login.PremiumLoginManager;
 import dev.quicklogin.storage.Database;
 import dev.quicklogin.storage.PlayerData;
 import org.bukkit.Bukkit;
@@ -14,12 +13,21 @@ import java.util.UUID;
 import java.util.logging.Logger;
 
 /**
- * Performs the actual AuthMe auto-login for verified premium and Bedrock
- * players at join time.
+ * Auto-logs verified players into AuthMe at join time.
  *
- * <p>Threading: database work runs off the main thread; the AuthMe API is only
- * ever touched on the main thread, a couple of ticks after join so AuthMe has
- * finished its own join handling first.
+ * <p>On a Velocity network the proxy performs premium verification (the
+ * companion QuickLogin-Velocity plugin forces online-mode login for paid
+ * accounts). With modern forwarding the backend then receives the player's real
+ * Mojang UUID, so we can classify each player without any cross-plugin
+ * messaging:
+ * <ul>
+ *   <li>Bedrock (Floodgate) &rarr; auto-login</li>
+ *   <li>Version-4 UUID &rarr; premium, Mojang-verified by the proxy &rarr; auto-login</li>
+ *   <li>Version-3 UUID &rarr; offline/cracked &rarr; left to AuthMe's normal flow</li>
+ * </ul>
+ *
+ * <p>Database work runs off the main thread; the AuthMe API is only ever touched
+ * on the main thread, a couple of ticks after join.
  */
 public final class AutoLoginService {
 
@@ -32,50 +40,46 @@ public final class AutoLoginService {
     private final Database db;
     private final AuthMeHook authme;
     private final FloodgateHook floodgate;   // may be null
-    private final PremiumLoginManager premium; // may be null (premium disabled)
     private final SecureRandom random = new SecureRandom();
 
     public AutoLoginService(Plugin plugin, QuickLoginConfig config, Database db,
-                            AuthMeHook authme, FloodgateHook floodgate, PremiumLoginManager premium) {
+                            AuthMeHook authme, FloodgateHook floodgate) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
         this.db = db;
         this.authme = authme;
         this.floodgate = floodgate;
-        this.premium = premium;
     }
 
     public void onJoin(Player player) {
         String name = player.getName();
         String lower = name.toLowerCase(Locale.ROOT);
+        UUID uuid = player.getUniqueId();
 
-        PremiumLoginManager.PremiumMark mark = premium == null ? null : premium.consumeVerified(lower);
-        boolean isPremium = mark != null;
-        boolean isBedrock = !isPremium
-                && config.floodgateEnabled()
+        boolean bedrock = config.floodgateEnabled()
                 && floodgate != null
                 && floodgate.isBedrockPlayer(player);
 
-        if (!isPremium && !isBedrock) {
+        boolean premium = !bedrock
+                && config.premiumEnabled()
+                && uuid.version() == 4; // Mojang UUIDs are version 4; offline UUIDs are version 3.
+
+        if (!bedrock && !premium) {
             // Ordinary cracked player: leave them to AuthMe's normal /login flow.
             return;
         }
 
-        UUID onlineUuid = isPremium ? mark.onlineUuid() : null;
-        final boolean premiumFlag = isPremium;
+        final boolean premiumFlag = premium;
+        final String uuidStr = uuid.toString();
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
             long now = System.currentTimeMillis();
             PlayerData existing = db.find(lower);
             String password;
             long firstSeen;
-            String uuidStr = onlineUuid != null ? onlineUuid.toString()
-                    : (existing != null ? existing.premiumUuid() : null);
 
             if (existing == null || existing.password() == null || existing.password().isEmpty()) {
-                // Brand new account (or one that never got a managed password):
-                // generate one now and persist it.
                 password = generatePassword();
                 firstSeen = existing != null ? existing.firstSeen() : now;
             } else {
@@ -87,8 +91,6 @@ public final class AutoLoginService {
             db.save(new PlayerData(lower, name, uuidStr, premiumStored, password, firstSeen, now));
 
             final String pw = password;
-            // Defer AuthMe interaction to the main thread, a couple of ticks
-            // later, so it wins over AuthMe's own join handling.
             Bukkit.getScheduler().runTaskLater(plugin, () -> applyLogin(player, name, pw), 2L);
         });
     }
@@ -103,9 +105,10 @@ public final class AutoLoginService {
         boolean ok;
         if (authme.isRegistered(name)) {
             ok = authme.forceLogin(player);
-        } else {
-            // Register the account with the managed password, then log in.
+        } else if (config.authAutoRegister()) {
             ok = authme.forceRegister(player, password);
+        } else {
+            return; // auto-register disabled and not registered: leave to AuthMe.
         }
         if (config.debug()) {
             logger.info("Auto-login for '" + name + "': " + (ok ? "success" : "FAILED"));

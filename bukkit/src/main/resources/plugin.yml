@@ -6,11 +6,9 @@ author: QuickLogin
 description: Floodgate + premium Java auto-login for AuthMeReloaded. Drag-and-drop.
 website: https://github.com/Faboit1/QuickLogin
 
-# ProtocolLib is a hard dependency (needed for the premium handshake).
 # AuthMe is a hard dependency (we log players in through it).
 # Floodgate is soft: without it, only premium Java auto-login is active.
 depend:
-  - ProtocolLib
   - AuthMe
 softdepend:
   - floodgate
