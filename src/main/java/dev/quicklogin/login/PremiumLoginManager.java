@@ -263,7 +263,8 @@ public final class PremiumLoginManager {
         } finally {
             if (channel != null && channel.isOpen()) {
                 // Give the disconnect packet time to flush before closing.
-                channel.eventLoop().schedule(channel::close, 250, TimeUnit.MILLISECONDS);
+                // Block lambda (not a method ref) to bind the Runnable overload of schedule().
+                channel.eventLoop().schedule(() -> { channel.close(); }, 250, TimeUnit.MILLISECONDS);
             }
         }
     }
