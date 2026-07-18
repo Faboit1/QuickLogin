@@ -115,7 +115,12 @@ mvn -B package
 ```
 
 Produces `velocity/target/QuickLogin-Velocity-<version>.jar` and
-`bukkit/target/QuickLogin-Bukkit-<version>.jar`. Requires JDK 17+.
+`bukkit/target/QuickLogin-Bukkit-<version>.jar`.
+
+**Build requires JDK 25** (Velocity 4's API and annotation processor are
+compiled for Java 25). The emitted bytecode targets Java 17, so the jars still
+run on Java 17+ backends; the Velocity jar runs on the Java 25 that Velocity 4
+itself requires.
 
 ### Automatic builds (GitHub Actions)
 
