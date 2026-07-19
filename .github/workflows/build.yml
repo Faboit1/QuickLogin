@@ -17,37 +17,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Velocity 4's API + annotation processor are compiled for Java 25, so the
-      # build needs a JDK 25. Output bytecode is still targeted at 17
-      # (maven.compiler.release), so both jars run on Java 17+ servers.
-      - name: Set up JDK 25
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '17'
           cache: maven
 
       - name: Build with Maven
         run: mvn -B -ntp package
 
-      - name: Upload Velocity plugin jar
+      - name: Upload plugin jar
         uses: actions/upload-artifact@v4
         with:
-          name: QuickLogin-Velocity
-          path: velocity/target/QuickLogin-Velocity-*.jar
+          name: QuickLogin
+          path: target/QuickLogin-*.jar
           if-no-files-found: error
 
-      - name: Upload Bukkit plugin jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: QuickLogin-Bukkit
-          path: bukkit/target/QuickLogin-Bukkit-*.jar
-          if-no-files-found: error
-
-      - name: Attach jars to release
+      - name: Attach jar to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            velocity/target/QuickLogin-Velocity-*.jar
-            bukkit/target/QuickLogin-Bukkit-*.jar
+          files: target/QuickLogin-*.jar

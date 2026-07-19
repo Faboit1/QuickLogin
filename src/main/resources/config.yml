@@ -1,22 +1,20 @@
 # =====================================================================
-#  QuickLogin (backend)  -  configuration
+#  QuickLogin  -  configuration
 # ---------------------------------------------------------------------
-#  Auto-logs proxy-verified premium players and Bedrock (Floodgate)
+#  Auto-registers/auto-logs premium Java players and Bedrock (Floodgate)
 #  players into AuthMeReloaded.
 #
-#  Premium VERIFICATION happens on the Velocity proxy (install the
-#  companion QuickLogin-Velocity plugin there). This backend plugin only
-#  decides who to auto-login, based on the forwarded UUID and Floodgate.
-#
-#  Requires: modern player-info forwarding between Velocity and this
-#  server (the standard Velocity + Paper setup).
+#  Premium players are those who arrive already Mojang-verified (a real
+#  version-4 UUID). That verification is done by online-mode login (your
+#  proxy in online-mode, or a standalone online-mode server) - not by this
+#  plugin. Behind a proxy, this requires modern player-info forwarding so
+#  the real UUID reaches the backend. See the README for details.
 # =====================================================================
 
 config-version: 2
 
 premium:
-  # Auto-login players who arrive with a real (Mojang-verified) UUID.
-  # These are premium accounts the Velocity plugin forced into online mode.
+  # Auto-login Java players who arrive with a real, Mojang-verified (v4) UUID.
   enabled: true
 
 floodgate:
@@ -32,6 +30,10 @@ auth:
   # Length of the randomly generated password. These are never typed by a
   # human, so longer is strictly better.
   generated-password-length: 32
+
+  # Ticks to wait after join before logging the player into AuthMe. Increase
+  # if another plugin processes the join late. (20 ticks = 1 second.)
+  login-delay-ticks: 5
 
 database:
   # SQLite file inside the plugin folder.

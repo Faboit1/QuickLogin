@@ -68,7 +68,15 @@ public final class QuickLoginPlugin extends JavaPlugin {
             getCommand("quicklogin").setTabCompleter(command);
         }
 
-        getLogger().info("QuickLogin (backend) enabled.");
+        getLogger().info("QuickLogin enabled. AuthMe: hooked"
+                + " | Floodgate: " + (floodgate != null ? "hooked" : "not found")
+                + " | premium auto-login: " + (config.premiumEnabled() ? "on" : "off")
+                + " | Bedrock auto-login: " + (config.floodgateEnabled() && floodgate != null ? "on" : "off"));
+        if (config.premiumEnabled()) {
+            getLogger().info("Note: premium auto-login only works if your proxy verifies "
+                    + "accounts (Velocity online-mode=true). Enable 'debug' to see how each "
+                    + "player is classified on join.");
+        }
     }
 
     @Override
