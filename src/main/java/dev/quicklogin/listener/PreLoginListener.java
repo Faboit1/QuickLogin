@@ -74,6 +74,13 @@ public final class PreLoginListener implements Listener {
         if (config.debug()) {
             logger.info("Pre-login '" + name + "' (" + type + "): will approve through pre-join dialog.");
         }
+
+        if (preJoinHook.approvePreJoin(name)) {
+            if (config.debug()) {
+                logger.info("Approved " + type + " player '" + name + "' through the pre-join dialog (immediate).");
+            }
+            return;
+        }
         startApproveLoop(name, type);
     }
 
@@ -101,6 +108,6 @@ public final class PreLoginListener implements Listener {
                     cancel();
                 }
             }
-        }.runTaskTimerAsynchronously(plugin, POLL_TICKS, POLL_TICKS);
+        }.runTaskTimerAsynchronously(plugin, 1L, POLL_TICKS);
     }
 }

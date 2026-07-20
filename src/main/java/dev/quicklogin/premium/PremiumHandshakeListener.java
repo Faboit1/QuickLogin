@@ -5,7 +5,6 @@ import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketReceiveEvent;
 import com.github.retrooper.packetevents.netty.channel.ChannelHelper;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
-import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.User;
 import com.github.retrooper.packetevents.wrapper.handshaking.client.WrapperHandshakingClientHandshake;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientEncryptionResponse;
@@ -21,7 +20,6 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.net.InetSocketAddress;
 import java.security.GeneralSecurityException;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,10 +33,10 @@ import java.util.regex.Pattern;
  * to physically hold the LOGIN_START packet while the async Mojang check runs.
  *
  * <p>On {@code HANDSHAKE} (login intent) a {@link PremiumLoginHandler} is injected
- * before {@code packet_handler} so it can catch the upcoming LOGIN_START. On
- * LOGIN_START this listener checks whether the player is a Bedrock/Floodgate
- * connection (release immediately) or a premium Java account (send EncryptionRequest
- * and wait for EncryptionResponse). Cracked players are released immediately too.
+ * before {@code packet_handler} so it can catch the upcoming LOGIN_START.
+ * Bedrock/Floodgate connections are detected at HANDSHAKE time (via the {@code \0}
+ * separator Geyser injects into the hostname) and skipped entirely — no handler
+ * is injected for them.
  *
  * <p>The held-packet approach sidesteps the fact that PacketEvents'
  * {@code event.setCancelled(true)} does not prevent the vanilla
@@ -85,8 +83,15 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         if (wrapper.getIntention() != WrapperHandshakingClientHandshake.ConnectionIntention.LOGIN) {
             return;
         }
+
         User user = event.getUser();
         String key = connectionKey(user);
+
+        if (isFloodgateHandshake(wrapper, user)) {
+            if (config.debug()) logger.info("[QuickLogin] Detected Floodgate handshake for " + key + "; skipping premium.");
+            return;
+        }
+
         try {
             PremiumLoginHandler handler = new PremiumLoginHandler(logger, config.debug());
             ChannelPipeline pipeline = (ChannelPipeline) ChannelHelper.getPipeline(user.getChannel());
@@ -97,24 +102,42 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         }
     }
 
+    private boolean isFloodgateHandshake(WrapperHandshakingClientHandshake wrapper, User user) {
+        if (floodgate == null || !config.floodgateEnabled()) {
+            return false;
+        }
+        String addr = wrapper.getServerAddress();
+        if (addr != null && addr.indexOf('\0') >= 0) {
+            return true;
+        }
+        try {
+            ChannelPipeline pipeline = (ChannelPipeline) ChannelHelper.getPipeline(user.getChannel());
+            for (String name : pipeline.names()) {
+                if (name.contains("floodgate")) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
     private void handleLoginStart(PacketReceiveEvent event) {
+        User user = event.getUser();
+        String connectionKey = connectionKey(user);
+
+        if (!handlers.containsKey(connectionKey)) {
+            return;
+        }
+
         WrapperLoginClientLoginStart wrapper = new WrapperLoginClientLoginStart(event);
         String username = wrapper.getUsername();
         if (username == null || !VALID_USERNAME.matcher(username).matches()) {
-            releaseHandler(event.getUser());
-            return;
-        }
-
-        User user = event.getUser();
-        String connectionKey = connectionKey(user);
-        UUID playerUuid = wrapper.getPlayerUUID().orElse(null);
-
-        if (floodgate != null && config.floodgateEnabled() && playerUuid != null
-                && floodgate.isBedrockPlayer(playerUuid)) {
-            if (config.debug()) logger.info("[QuickLogin] '" + username + "' is Bedrock; skipping premium check.");
             releaseHandler(user);
             return;
         }
+
+        UUID playerUuid = wrapper.getPlayerUUID().orElse(null);
 
         executor.execute(() -> {
             boolean premium = mojang.lookup(username) == MojangApiService.Result.PREMIUM;
@@ -139,7 +162,6 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         }
 
         String username = verifier.getPendingUsername(connectionKey);
-        UUID playerUuid = verifier.getPendingPlayerUuid(connectionKey);
 
         WrapperLoginClientEncryptionResponse wrapper = new WrapperLoginClientEncryptionResponse(event);
         Optional<byte[]> encVerifyTokenOpt = wrapper.getEncryptedVerifyToken();
