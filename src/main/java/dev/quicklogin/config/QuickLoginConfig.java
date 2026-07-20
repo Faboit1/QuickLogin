@@ -10,6 +10,7 @@ public final class QuickLoginConfig {
     private final boolean premiumEnabled;
     private final boolean floodgateEnabled;
     private final boolean authAutoRegister;
+    private final boolean skipPreJoinDialog;
     private final int generatedPasswordLength;
     private final int loginDelayTicks;
     private final String databaseFile;
@@ -19,7 +20,9 @@ public final class QuickLoginConfig {
         this.premiumEnabled = c.getBoolean("premium.enabled", true);
         this.floodgateEnabled = c.getBoolean("floodgate.enabled", true);
         this.authAutoRegister = c.getBoolean("auth.auto-register", true);
-        this.generatedPasswordLength = clamp(c.getInt("auth.generated-password-length", 32), 8, 128);
+        this.skipPreJoinDialog = c.getBoolean("auth.skip-prejoin-dialog", true);
+        // Keep well under AuthMe's max password length (default 30) or registration is rejected.
+        this.generatedPasswordLength = clamp(c.getInt("auth.generated-password-length", 16), 8, 30);
         this.loginDelayTicks = clamp(c.getInt("auth.login-delay-ticks", 5), 1, 200);
         this.databaseFile = c.getString("database.file", "quicklogin.db");
         this.debug = c.getBoolean("debug", false);
@@ -36,6 +39,7 @@ public final class QuickLoginConfig {
     public boolean premiumEnabled() { return premiumEnabled; }
     public boolean floodgateEnabled() { return floodgateEnabled; }
     public boolean authAutoRegister() { return authAutoRegister; }
+    public boolean skipPreJoinDialog() { return skipPreJoinDialog; }
     public int generatedPasswordLength() { return generatedPasswordLength; }
     public int loginDelayTicks() { return loginDelayTicks; }
     public String databaseFile() { return databaseFile; }

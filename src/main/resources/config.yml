@@ -27,9 +27,16 @@ auth:
   # same stored password is used. Players never run /register or /login.
   auto-register: true
 
-  # Length of the randomly generated password. These are never typed by a
-  # human, so longer is strictly better.
-  generated-password-length: 32
+  # AuthMe 6 shows a login dialog during the connection's configuration phase
+  # (before the player is fully online). When true, QuickLogin approves trusted
+  # players (Bedrock, and premium/verified v4-UUID players) through that dialog
+  # so it never appears for them, while normal players still get it. Requires
+  # AuthMe 6's pre-join dialog; harmless if absent.
+  skip-prejoin-dialog: true
+
+  # Length of the randomly generated password. Kept under AuthMe's max
+  # password length (default 30) so registration is never rejected.
+  generated-password-length: 16
 
   # Ticks to wait after join before logging the player into AuthMe. Increase
   # if another plugin processes the join late. (20 ticks = 1 second.)

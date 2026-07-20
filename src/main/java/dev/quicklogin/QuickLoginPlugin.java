@@ -1,11 +1,13 @@
 package dev.quicklogin;
 
 import dev.quicklogin.auth.AuthMeHook;
+import dev.quicklogin.auth.AuthMeInternalHook;
 import dev.quicklogin.auth.AutoLoginService;
 import dev.quicklogin.auth.FloodgateHook;
 import dev.quicklogin.command.QuickLoginCommand;
 import dev.quicklogin.config.QuickLoginConfig;
 import dev.quicklogin.listener.JoinListener;
+import dev.quicklogin.listener.PreLoginListener;
 import dev.quicklogin.storage.Database;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -13,13 +15,12 @@ import java.io.File;
 import java.util.Locale;
 
 /**
- * QuickLogin backend plugin: auto-logs proxy-verified premium players and
- * Bedrock (Floodgate) players into AuthMeReloaded, registering new accounts with
- * a random password stored in SQLite.
+ * QuickLogin backend plugin: auto-registers and auto-logs Bedrock (Floodgate)
+ * and Mojang-verified players into AuthMeReloaded.
  *
- * <p>Premium verification itself happens on the Velocity proxy (companion
- * QuickLogin-Velocity plugin); this plugin classifies players by their forwarded
- * UUID and Floodgate status.
+ * <p>For AuthMe 6, trusted players are approved through its configuration-phase
+ * pre-join dialog ({@link AuthMeInternalHook}) so it never shows for them, then
+ * force-logged-in on join.
  */
 public final class QuickLoginPlugin extends JavaPlugin {
 
@@ -58,9 +59,14 @@ public final class QuickLoginPlugin extends JavaPlugin {
             getLogger().info("Floodgate not detected; Bedrock auto-login is inactive.");
         }
 
+        // --- AuthMe 6 pre-join dialog hook (config-phase login) ---
+        AuthMeInternalHook preJoinHook = AuthMeInternalHook.create(getLogger(), config.debug());
+
         // --- Auto-login + listeners ---
         AutoLoginService autoLogin = new AutoLoginService(this, config, database, authme, floodgate);
         getServer().getPluginManager().registerEvents(new JoinListener(autoLogin), this);
+        getServer().getPluginManager().registerEvents(
+                new PreLoginListener(this, config, floodgate, preJoinHook), this);
 
         QuickLoginCommand command = new QuickLoginCommand(this);
         if (getCommand("quicklogin") != null) {
@@ -70,13 +76,8 @@ public final class QuickLoginPlugin extends JavaPlugin {
 
         getLogger().info("QuickLogin enabled. AuthMe: hooked"
                 + " | Floodgate: " + (floodgate != null ? "hooked" : "not found")
-                + " | premium auto-login: " + (config.premiumEnabled() ? "on" : "off")
+                + " | pre-join dialog hook: " + (preJoinHook.isAvailable() ? "active" : "unavailable")
                 + " | Bedrock auto-login: " + (config.floodgateEnabled() && floodgate != null ? "on" : "off"));
-        if (config.premiumEnabled()) {
-            getLogger().info("Note: premium auto-login only works if your proxy verifies "
-                    + "accounts (Velocity online-mode=true). Enable 'debug' to see how each "
-                    + "player is classified on join.");
-        }
     }
 
     @Override
