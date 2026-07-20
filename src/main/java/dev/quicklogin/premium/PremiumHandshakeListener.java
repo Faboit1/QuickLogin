@@ -7,9 +7,12 @@ import com.github.retrooper.packetevents.netty.channel.ChannelHelper;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.player.User;
+import com.github.retrooper.packetevents.wrapper.handshaking.client.WrapperHandshakingClientHandshake;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientEncryptionResponse;
 import com.github.retrooper.packetevents.wrapper.login.client.WrapperLoginClientLoginStart;
 import com.github.retrooper.packetevents.wrapper.login.server.WrapperLoginServerEncryptionRequest;
+import dev.quicklogin.auth.FloodgateHook;
+import dev.quicklogin.config.QuickLoginConfig;
 import dev.quicklogin.mojang.MojangApiService;
 import io.netty.channel.ChannelPipeline;
 
@@ -21,23 +24,25 @@ import java.security.GeneralSecurityException;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 /**
- * Intercepts {@code LOGIN_START} / {@code ENCRYPTION_RESPONSE} to run the Mojang
- * premium handshake for paid accounts — exactly how an online-mode server (and
- * AuthMe's own premium feature) verifies identity, but driven by a direct Mojang
- * name lookup so <b>every</b> premium account is verified automatically (no
- * {@code /premium} opt-in).
+ * Intercepts the Minecraft login sequence to perform Mojang premium verification
+ * for paid accounts, using a Netty pipeline handler ({@link PremiumLoginHandler})
+ * to physically hold the LOGIN_START packet while the async Mojang check runs.
  *
- * <p>On success the name is recorded in {@link PremiumVerifier}; QuickLogin then
- * approves it through AuthMe's pre-join dialog and auto-registers/auto-logs it in.
- * Cracked players and unverifiable sessions pass straight through to AuthMe's
- * normal flow (no kick).
+ * <p>On {@code HANDSHAKE} (login intent) a {@link PremiumLoginHandler} is injected
+ * before {@code packet_handler} so it can catch the upcoming LOGIN_START. On
+ * LOGIN_START this listener checks whether the player is a Bedrock/Floodgate
+ * connection (release immediately) or a premium Java account (send EncryptionRequest
+ * and wait for EncryptionResponse). Cracked players are released immediately too.
  *
- * <p>Structure adapted from AuthMeReloaded's {@code PremiumVerificationPacketListener}.
+ * <p>The held-packet approach sidesteps the fact that PacketEvents'
+ * {@code event.setCancelled(true)} does not prevent the vanilla
+ * {@code ServerLoginPacketListenerImpl} from processing LOGIN_START on Paper 1.21.x.
  */
 public final class PremiumHandshakeListener extends PacketListenerAbstract {
 
@@ -47,24 +52,48 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
     private final MojangApiService mojang;
     private final ExecutorService executor;
     private final Logger logger;
-    private final boolean debug;
+    private final FloodgateHook floodgate;
+    private final QuickLoginConfig config;
+
+    private final ConcurrentHashMap<String, PremiumLoginHandler> handlers = new ConcurrentHashMap<>();
 
     public PremiumHandshakeListener(PremiumVerifier verifier, MojangApiService mojang,
-                                    ExecutorService executor, Logger logger, boolean debug) {
+                                    ExecutorService executor, Logger logger,
+                                    FloodgateHook floodgate, QuickLoginConfig config) {
         super(PacketListenerPriority.LOW);
         this.verifier = verifier;
         this.mojang = mojang;
         this.executor = executor;
         this.logger = logger;
-        this.debug = debug;
+        this.floodgate = floodgate;
+        this.config = config;
     }
 
     @Override
     public void onPacketReceive(PacketReceiveEvent event) {
-        if (event.getPacketType() == PacketType.Login.Client.LOGIN_START) {
+        if (event.getPacketType() == PacketType.Handshaking.Client.HANDSHAKE) {
+            handleHandshake(event);
+        } else if (event.getPacketType() == PacketType.Login.Client.LOGIN_START) {
             handleLoginStart(event);
         } else if (event.getPacketType() == PacketType.Login.Client.ENCRYPTION_RESPONSE) {
             handleEncryptionResponse(event);
+        }
+    }
+
+    private void handleHandshake(PacketReceiveEvent event) {
+        WrapperHandshakingClientHandshake wrapper = new WrapperHandshakingClientHandshake(event);
+        if (wrapper.getIntention() != WrapperHandshakingClientHandshake.ConnectionIntention.LOGIN) {
+            return;
+        }
+        User user = event.getUser();
+        String key = connectionKey(user);
+        try {
+            PremiumLoginHandler handler = new PremiumLoginHandler(logger, config.debug());
+            ChannelPipeline pipeline = (ChannelPipeline) ChannelHelper.getPipeline(user.getChannel());
+            pipeline.addBefore("packet_handler", PremiumLoginHandler.HANDLER_NAME, handler);
+            handlers.put(key, handler);
+        } catch (Exception e) {
+            logger.warning("[QuickLogin] Failed to inject premium handler: " + e.getMessage());
         }
     }
 
@@ -72,28 +101,32 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         WrapperLoginClientLoginStart wrapper = new WrapperLoginClientLoginStart(event);
         String username = wrapper.getUsername();
         if (username == null || !VALID_USERNAME.matcher(username).matches()) {
-            return; // Bedrock / invalid names: leave for Floodgate or vanilla.
+            releaseHandler(event.getUser());
+            return;
         }
 
         User user = event.getUser();
-        ClientVersion clientVersion = user.getClientVersion();
         String connectionKey = connectionKey(user);
         UUID playerUuid = wrapper.getPlayerUUID().orElse(null);
 
-        // Take over this login while we decide (off the event loop for the HTTP lookup).
-        event.setCancelled(true);
+        if (floodgate != null && config.floodgateEnabled() && playerUuid != null
+                && floodgate.isBedrockPlayer(playerUuid)) {
+            if (config.debug()) logger.info("[QuickLogin] '" + username + "' is Bedrock; skipping premium check.");
+            releaseHandler(user);
+            return;
+        }
 
         executor.execute(() -> {
             boolean premium = mojang.lookup(username) == MojangApiService.Result.PREMIUM;
             if (premium) {
-                if (debug) logger.info("[QuickLogin] '" + username + "' is premium; requesting Mojang verification.");
+                if (config.debug()) logger.info("[QuickLogin] '" + username + "' is premium; requesting Mojang verification.");
                 byte[] verifyToken = verifier.startVerification(connectionKey, username, playerUuid);
                 WrapperLoginServerEncryptionRequest encReq = new WrapperLoginServerEncryptionRequest(
                         "", verifier.getPublicKey(), verifyToken, true);
                 user.sendPacket(encReq);
             } else {
-                // Cracked / unknown: resume normal (offline) login untouched.
-                resumeLogin(user, username, clientVersion, playerUuid);
+                if (config.debug()) logger.info("[QuickLogin] '" + username + "' is not premium; releasing to vanilla.");
+                releaseHandler(user);
             }
         });
     }
@@ -107,7 +140,6 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
 
         String username = verifier.getPendingUsername(connectionKey);
         UUID playerUuid = verifier.getPendingPlayerUuid(connectionKey);
-        ClientVersion clientVersion = user.getClientVersion();
 
         WrapperLoginClientEncryptionResponse wrapper = new WrapperLoginClientEncryptionResponse(event);
         Optional<byte[]> encVerifyTokenOpt = wrapper.getEncryptedVerifyToken();
@@ -115,25 +147,21 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         event.setCancelled(true);
 
         if (encVerifyTokenOpt.isEmpty()) {
-            // Signed-nonce variant (we sent a plain token): give up premium, resume normally.
             verifier.cleanupPending(connectionKey);
-            resumeLogin(user, username, clientVersion, playerUuid);
+            releaseHandler(user);
             return;
         }
 
         byte[] encSharedSecret = wrapper.getEncryptedSharedSecret().clone();
         byte[] encVerifyToken = encVerifyTokenOpt.get().clone();
 
-        // RSA-decrypt + install AES ciphers synchronously (we're on the event loop). The client
-        // is already encrypting after ENCRYPTION_RESPONSE, so this must happen before any further
-        // packet arrives.
         byte[] sharedSecret;
         try {
             sharedSecret = verifier.decryptData(encSharedSecret);
         } catch (GeneralSecurityException e) {
             logger.warning("[QuickLogin] RSA decryption failed for '" + username + "': " + e.getMessage());
             verifier.cleanupPending(connectionKey);
-            resumeLogin(user, username, clientVersion, playerUuid);
+            releaseHandler(user);
             return;
         }
         enableChannelEncryption(user.getChannel(), sharedSecret);
@@ -142,16 +170,16 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
                 .thenAccept(maybeUuid -> {
                     if (maybeUuid.isPresent()) {
                         verifier.storeVerified(username, maybeUuid.get());
-                        if (debug) logger.info("[QuickLogin] Verified premium session for '" + username + "'.");
-                    } else if (debug) {
+                        if (config.debug()) logger.info("[QuickLogin] Verified premium session for '" + username + "'.");
+                    } else if (config.debug()) {
                         logger.info("[QuickLogin] Premium session NOT verified for '" + username
                                 + "' (expired/invalid); resuming normally.");
                     }
-                    resumeLogin(user, username, clientVersion, playerUuid);
+                    releaseHandler(user);
                 })
                 .exceptionally(ex -> {
                     logger.warning("[QuickLogin] Premium verification error for '" + username + "': " + ex);
-                    resumeLogin(user, username, clientVersion, playerUuid);
+                    releaseHandler(user);
                     return null;
                 });
     }
@@ -174,10 +202,17 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         }
     }
 
-    private void resumeLogin(User user, String username, ClientVersion clientVersion, UUID playerUuid) {
-        WrapperLoginClientLoginStart resume =
-                new WrapperLoginClientLoginStart(clientVersion, username, null, playerUuid);
-        user.receivePacketSilently(resume);
+    private void releaseHandler(User user) {
+        String key = connectionKey(user);
+        PremiumLoginHandler handler = handlers.remove(key);
+        if (handler != null) {
+            handler.releaseLogin();
+        }
+    }
+
+    public void cleanup() {
+        handlers.values().forEach(PremiumLoginHandler::releaseLogin);
+        handlers.clear();
     }
 
     private static String connectionKey(User user) {

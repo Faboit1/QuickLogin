@@ -116,7 +116,7 @@ public final class QuickLoginPlugin extends JavaPlugin {
         }
         try {
             this.premiumListener = new PremiumHandshakeListener(
-                    verifier, mojang, workers, getLogger(), config.debug());
+                    verifier, mojang, workers, getLogger(), floodgate, config);
             PacketEvents.getAPI().getEventManager().registerListener(premiumListener);
             return true;
         } catch (Throwable t) {
@@ -138,6 +138,7 @@ public final class QuickLoginPlugin extends JavaPlugin {
     public void onDisable() {
         if (premiumListener != null) {
             try {
+                premiumListener.cleanup();
                 PacketEvents.getAPI().getEventManager().unregisterListener(premiumListener);
             } catch (Throwable ignored) {
             }
