@@ -36,14 +36,16 @@ public final class PreLoginListener implements Listener {
     private final QuickLoginConfig config;
     private final FloodgateHook floodgate;         // may be null
     private final AuthMeInternalHook preJoinHook;
+    private final dev.quicklogin.premium.PremiumVerifier premium;
 
-    public PreLoginListener(Plugin plugin, QuickLoginConfig config,
-                            FloodgateHook floodgate, AuthMeInternalHook preJoinHook) {
+    public PreLoginListener(Plugin plugin, QuickLoginConfig config, FloodgateHook floodgate,
+                            AuthMeInternalHook preJoinHook, dev.quicklogin.premium.PremiumVerifier premium) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
         this.floodgate = floodgate;
         this.preJoinHook = preJoinHook;
+        this.premium = premium;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -59,10 +61,10 @@ public final class PreLoginListener implements Listener {
         UUID uuid = event.getUniqueId();
 
         boolean bedrock = config.floodgateEnabled() && floodgate != null && floodgate.isBedrockPlayer(uuid);
-        // Premium: either an already-Mojang-verified UUID (online/proxy) or a player AuthMe
-        // just cryptographically verified via its own handshake this connection.
+        // Premium: an already-Mojang-verified UUID (online/proxy), or a player QuickLogin just
+        // cryptographically verified via the PacketEvents handshake on this connection.
         boolean verifiedPremium = config.premiumEnabled()
-                && (uuid.version() == 4 || preJoinHook.getVerifiedPremiumUuid(name) != null);
+                && (uuid.version() == 4 || premium.isVerified(name));
 
         if (!bedrock && !verifiedPremium) {
             return; // Normal / unverified player: let AuthMe show its dialog.

@@ -8,16 +8,21 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 /**
- * Minimal direct client for the Mojang profile API: answers "is this name a
- * paid Minecraft account?" Talks to Mojang directly, never through a proxy.
+ * Minimal direct client for the Mojang APIs: answers "is this name a paid
+ * account?" and performs the {@code hasJoined} session check. Talks to Mojang
+ * directly, never through a proxy.
  */
 public final class MojangApiService {
 
     private static final String PROFILE_URL = "https://api.mojang.com/users/profiles/minecraft/";
+    private static final String HAS_JOINED_URL =
+            "https://sessionserver.mojang.com/session/minecraft/hasJoined";
 
     private final Logger logger;
     private final boolean debug;
@@ -84,7 +89,64 @@ public final class MojangApiService {
         return result;
     }
 
+    /**
+     * Verify a client's session via {@code hasJoined}. Blocking; call off the
+     * main thread. The server IP is never sent (so it works behind a proxy).
+     *
+     * @return the Mojang-verified UUID, or empty if the session is invalid/expired
+     */
+    public Optional<UUID> hasJoined(String username, String serverHash) {
+        try {
+            String url = HAS_JOINED_URL
+                    + "?username=" + URLEncoder.encode(username, StandardCharsets.UTF_8)
+                    + "&serverId=" + URLEncoder.encode(serverHash, StandardCharsets.UTF_8);
+            HttpResponse<String> resp = http.send(
+                    HttpRequest.newBuilder().uri(URI.create(url)).timeout(timeout)
+                            .header("Accept", "application/json").GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() == 200 && resp.body() != null && !resp.body().isBlank()) {
+                String id = extractJsonString(resp.body(), "id");
+                UUID uuid = id == null ? null : parseUndashedUuid(id);
+                return Optional.ofNullable(uuid);
+            }
+            if (debug) logger.info("hasJoined for '" + username + "' returned " + resp.statusCode());
+            return Optional.empty();
+        } catch (Exception e) {
+            if (debug) logger.warning("hasJoined failed for '" + username + "': " + e);
+            return Optional.empty();
+        }
+    }
+
     public void clearCache() {
         cache.clear();
+    }
+
+    /** Convert Mojang's un-dashed 32-char UUID into a {@link UUID}. */
+    public static UUID parseUndashedUuid(String undashed) {
+        if (undashed == null || undashed.length() != 32) {
+            return null;
+        }
+        String dashed = undashed.substring(0, 8) + "-" + undashed.substring(8, 12) + "-"
+                + undashed.substring(12, 16) + "-" + undashed.substring(16, 20) + "-"
+                + undashed.substring(20, 32);
+        try {
+            return UUID.fromString(dashed);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /** Minimal extractor for a top-level string field in flat Mojang JSON. */
+    static String extractJsonString(String json, String field) {
+        String needle = "\"" + field + "\"";
+        int keyIdx = json.indexOf(needle);
+        if (keyIdx < 0) return null;
+        int colon = json.indexOf(':', keyIdx + needle.length());
+        if (colon < 0) return null;
+        int firstQuote = json.indexOf('"', colon + 1);
+        if (firstQuote < 0) return null;
+        int endQuote = json.indexOf('"', firstQuote + 1);
+        if (endQuote < 0) return null;
+        return json.substring(firstQuote + 1, endQuote);
     }
 }

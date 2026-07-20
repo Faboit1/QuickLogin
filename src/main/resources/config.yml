@@ -14,21 +14,18 @@
 config-version: 2
 
 premium:
-  # Handle premium (paid) Java accounts.
-  #  - Players with an online-mode/proxy-forwarded (v4) UUID are approved
-  #    through AuthMe's pre-join dialog and auto-logged-in.
-  #  - On an offline server, AuthMe 6 verifies premium accounts itself via
-  #    PacketEvents; QuickLogin drives that automatically (see auto-enroll).
-  # Requires AuthMe's premium feature: set 'settings.enablePremium: true' in
-  # AuthMe's config.yml.
+  # Verify paid (Mojang/Microsoft) Java accounts and auto-register/auto-login
+  # them with zero friction. QuickLogin performs the real Mojang encryption
+  # handshake itself (via PacketEvents), exactly like an online-mode server:
+  # a premium account is cryptographically verified against Mojang, then
+  # approved through AuthMe's pre-join dialog and auto-registered/logged-in.
+  # Cracked players and expired/invalid sessions fall through to AuthMe's
+  # normal login (they are NOT kicked).
+  #
+  # Requires PacketEvents installed. IMPORTANT: if you use this, set
+  # 'settings.enablePremium: false' in AuthMe's config so the two don't both
+  # run the handshake.
   enabled: true
-
-  # Automatically enroll premium players into AuthMe's premium mode so nobody
-  # ever runs /premium. The first time a premium account logs in, AuthMe runs
-  # its one-time verify-on-reconnect; after that every login is seamless.
-  # Enrollment is still finalized by AuthMe's own Mojang session check, so a
-  # cracked client using a premium name cannot pass.
-  auto-enroll: true
 
 floodgate:
   # Auto-login Bedrock (Floodgate) players into AuthMe on join.

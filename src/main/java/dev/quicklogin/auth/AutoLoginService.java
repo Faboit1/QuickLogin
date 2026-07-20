@@ -45,16 +45,18 @@ public final class AutoLoginService {
     private final Database db;
     private final AuthMeHook authme;
     private final FloodgateHook floodgate;   // may be null
+    private final dev.quicklogin.premium.PremiumVerifier premium;
     private final SecureRandom random = new SecureRandom();
 
-    public AutoLoginService(Plugin plugin, QuickLoginConfig config, Database db,
-                            AuthMeHook authme, FloodgateHook floodgate) {
+    public AutoLoginService(Plugin plugin, QuickLoginConfig config, Database db, AuthMeHook authme,
+                            FloodgateHook floodgate, dev.quicklogin.premium.PremiumVerifier premium) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
         this.db = db;
         this.authme = authme;
         this.floodgate = floodgate;
+        this.premium = premium;
     }
 
     public void onJoin(Player player) {
@@ -66,21 +68,24 @@ public final class AutoLoginService {
                 && floodgate != null
                 && floodgate.isBedrockPlayer(player);
 
-        boolean premium = !bedrock
+        // Premium = a Mojang-verified v4 UUID (online/proxy) OR a name QuickLogin's
+        // PacketEvents handshake cryptographically verified this connection.
+        boolean isPremium = !bedrock
                 && config.premiumEnabled()
-                && uuid.version() == 4; // Mojang UUIDs are v4; offline/cracked are v3.
+                && (uuid.version() == 4 || this.premium.isVerified(name));
 
         if (config.debug()) {
             logger.info("Join '" + name + "': uuid=" + uuid + " (v" + uuid.version() + "), "
                     + "floodgate=" + (floodgate != null && floodgate.isBedrockPlayer(player))
-                    + " -> " + (bedrock ? "BEDROCK" : premium ? "PREMIUM" : "cracked (ignored)"));
+                    + ", verified=" + this.premium.isVerified(name)
+                    + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM" : "cracked (ignored)"));
         }
 
-        if (!bedrock && !premium) {
+        if (!bedrock && !isPremium) {
             return; // Cracked / unverified: AuthMe handles normally.
         }
 
-        final boolean premiumFlag = premium;
+        final boolean premiumFlag = isPremium;
         final String type = bedrock ? "Bedrock" : "premium";
         final String uuidStr = uuid.toString();
 

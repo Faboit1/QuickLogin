@@ -7,11 +7,13 @@ description: Floodgate + premium Java auto-login for AuthMeReloaded. Drag-and-dr
 website: https://github.com/Faboit1/QuickLogin
 
 # AuthMe is a hard dependency (we log players in through it).
-# Floodgate is soft: without it, only premium Java auto-login is active.
+# PacketEvents is soft: needed for premium (Mojang) verification.
+# Floodgate is soft: needed for Bedrock auto-login.
 depend:
   - AuthMe
 softdepend:
   - floodgate
+  - packetevents
 
 commands:
   quicklogin:

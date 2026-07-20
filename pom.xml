@@ -46,6 +46,22 @@
 
         <!-- Floodgate is accessed reflectively (see FloodgateHook): no compile dep. -->
 
+        <!-- PacketEvents: the premium (Mojang) verification handshake. Provided by the server. -->
+        <dependency>
+            <groupId>com.github.retrooper</groupId>
+            <artifactId>packetevents-spigot</artifactId>
+            <version>2.12.1</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Netty: provided by the server; used to install the login cipher on the channel. -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-all</artifactId>
+            <version>4.1.100.Final</version>
+            <scope>provided</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>

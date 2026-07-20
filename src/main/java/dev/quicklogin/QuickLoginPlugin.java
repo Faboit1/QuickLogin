@@ -1,5 +1,6 @@
 package dev.quicklogin;
 
+import com.github.retrooper.packetevents.PacketEvents;
 import dev.quicklogin.auth.AuthMeHook;
 import dev.quicklogin.auth.AuthMeInternalHook;
 import dev.quicklogin.auth.AutoLoginService;
@@ -8,13 +9,18 @@ import dev.quicklogin.command.QuickLoginCommand;
 import dev.quicklogin.config.QuickLoginConfig;
 import dev.quicklogin.listener.JoinListener;
 import dev.quicklogin.listener.PreLoginListener;
-import dev.quicklogin.listener.PremiumEnrollmentListener;
 import dev.quicklogin.mojang.MojangApiService;
+import dev.quicklogin.premium.PremiumHandshakeListener;
+import dev.quicklogin.premium.PremiumVerifier;
 import dev.quicklogin.storage.Database;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * QuickLogin backend plugin: auto-registers and auto-logs Bedrock (Floodgate)
@@ -30,6 +36,8 @@ public final class QuickLoginPlugin extends JavaPlugin {
     private Database database;
     private AuthMeHook authme;
     private FloodgateHook floodgate;
+    private ExecutorService workers;
+    private PremiumHandshakeListener premiumListener;
 
     @Override
     public void onEnable() {
@@ -61,26 +69,26 @@ public final class QuickLoginPlugin extends JavaPlugin {
             getLogger().info("Floodgate not detected; Bedrock auto-login is inactive.");
         }
 
-        // --- AuthMe 6 pre-join dialog + premium bridge (reflection) ---
+        // --- AuthMe 6 pre-join dialog hook (reflection) ---
         AuthMeInternalHook preJoinHook = AuthMeInternalHook.create(getLogger(), config.debug());
 
-        // --- Mojang (direct) for premium-name detection ---
+        // --- Mojang (direct) + premium verifier ---
+        this.workers = Executors.newFixedThreadPool(3, daemonThreads());
         MojangApiService mojang = new MojangApiService(getLogger(), config.debug(),
                 config.mojangTimeoutMs(), config.mojangCacheSeconds());
+        PremiumVerifier premiumVerifier = new PremiumVerifier(mojang, workers);
+
+        // --- Premium handshake (PacketEvents) ---
+        boolean premiumActive = false;
+        if (config.premiumEnabled()) {
+            premiumActive = registerPremiumHandshake(premiumVerifier, mojang);
+        }
 
         // --- Auto-login + listeners ---
-        AutoLoginService autoLogin = new AutoLoginService(this, config, database, authme, floodgate);
+        AutoLoginService autoLogin = new AutoLoginService(this, config, database, authme, floodgate, premiumVerifier);
         getServer().getPluginManager().registerEvents(new JoinListener(autoLogin), this);
         getServer().getPluginManager().registerEvents(
-                new PreLoginListener(this, config, floodgate, preJoinHook), this);
-        if (config.premiumEnabled() && config.premiumAutoEnroll() && preJoinHook.premiumBridgeAvailable()) {
-            getServer().getPluginManager().registerEvents(
-                    new PremiumEnrollmentListener(this, config, mojang, preJoinHook, floodgate), this);
-            getLogger().info("Premium auto-enroll active (players never need /premium).");
-        } else if (config.premiumEnabled() && !preJoinHook.premiumBridgeAvailable()) {
-            getLogger().info("AuthMe premium feature not detected; premium auto-enroll inactive. "
-                    + "Enable 'settings.enablePremium: true' in AuthMe's config.");
-        }
+                new PreLoginListener(this, config, floodgate, preJoinHook, premiumVerifier), this);
 
         QuickLoginCommand command = new QuickLoginCommand(this);
         if (getCommand("quicklogin") != null) {
@@ -91,11 +99,52 @@ public final class QuickLoginPlugin extends JavaPlugin {
         getLogger().info("QuickLogin enabled. AuthMe: hooked"
                 + " | Floodgate: " + (floodgate != null ? "hooked" : "not found")
                 + " | pre-join dialog hook: " + (preJoinHook.isAvailable() ? "active" : "unavailable")
+                + " | premium verification: " + (premiumActive ? "active (PacketEvents)" : "inactive")
                 + " | Bedrock auto-login: " + (config.floodgateEnabled() && floodgate != null ? "on" : "off"));
+        if (config.premiumEnabled() && premiumActive) {
+            getLogger().info("IMPORTANT: QuickLogin now performs premium verification itself. "
+                    + "Set 'settings.enablePremium: false' in AuthMe's config to avoid a double handshake.");
+        }
+    }
+
+    /** Register the PacketEvents login listener. Returns true if it went live. */
+    private boolean registerPremiumHandshake(PremiumVerifier verifier, MojangApiService mojang) {
+        if (getServer().getPluginManager().getPlugin("packetevents") == null) {
+            getLogger().warning("PacketEvents not found; premium verification is disabled. "
+                    + "Install PacketEvents to enable premium auto-login.");
+            return false;
+        }
+        try {
+            this.premiumListener = new PremiumHandshakeListener(
+                    verifier, mojang, workers, getLogger(), config.debug());
+            PacketEvents.getAPI().getEventManager().registerListener(premiumListener);
+            return true;
+        } catch (Throwable t) {
+            getLogger().warning("Failed to register premium handshake with PacketEvents: " + t);
+            return false;
+        }
+    }
+
+    private static ThreadFactory daemonThreads() {
+        AtomicInteger idx = new AtomicInteger();
+        return r -> {
+            Thread t = new Thread(r, "QuickLogin-Worker-" + idx.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        };
     }
 
     @Override
     public void onDisable() {
+        if (premiumListener != null) {
+            try {
+                PacketEvents.getAPI().getEventManager().unregisterListener(premiumListener);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (workers != null) {
+            workers.shutdownNow();
+        }
         if (database != null) {
             database.close();
         }
