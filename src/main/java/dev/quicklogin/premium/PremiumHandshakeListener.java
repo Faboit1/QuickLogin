@@ -87,7 +87,7 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         User user = event.getUser();
         String key = connectionKey(user);
 
-        if (isFloodgateHandshake(wrapper, user)) {
+        if (isFloodgateHandshake(wrapper)) {
             if (config.debug()) logger.info("[QuickLogin] Detected Floodgate handshake for " + key + "; skipping premium.");
             return;
         }
@@ -102,24 +102,12 @@ public final class PremiumHandshakeListener extends PacketListenerAbstract {
         }
     }
 
-    private boolean isFloodgateHandshake(WrapperHandshakingClientHandshake wrapper, User user) {
+    private boolean isFloodgateHandshake(WrapperHandshakingClientHandshake wrapper) {
         if (floodgate == null || !config.floodgateEnabled()) {
             return false;
         }
         String addr = wrapper.getServerAddress();
-        if (addr != null && addr.indexOf('\0') >= 0) {
-            return true;
-        }
-        try {
-            ChannelPipeline pipeline = (ChannelPipeline) ChannelHelper.getPipeline(user.getChannel());
-            for (String name : pipeline.names()) {
-                if (name.contains("floodgate")) {
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
+        return addr != null && addr.indexOf('\0') >= 0;
     }
 
     private void handleLoginStart(PacketReceiveEvent event) {
