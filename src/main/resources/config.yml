@@ -14,8 +14,21 @@
 config-version: 2
 
 premium:
-  # Auto-login Java players who arrive with a real, Mojang-verified (v4) UUID.
+  # Handle premium (paid) Java accounts.
+  #  - Players with an online-mode/proxy-forwarded (v4) UUID are approved
+  #    through AuthMe's pre-join dialog and auto-logged-in.
+  #  - On an offline server, AuthMe 6 verifies premium accounts itself via
+  #    PacketEvents; QuickLogin drives that automatically (see auto-enroll).
+  # Requires AuthMe's premium feature: set 'settings.enablePremium: true' in
+  # AuthMe's config.yml.
   enabled: true
+
+  # Automatically enroll premium players into AuthMe's premium mode so nobody
+  # ever runs /premium. The first time a premium account logs in, AuthMe runs
+  # its one-time verify-on-reconnect; after that every login is seamless.
+  # Enrollment is still finalized by AuthMe's own Mojang session check, so a
+  # cracked client using a premium name cannot pass.
+  auto-enroll: true
 
 floodgate:
   # Auto-login Bedrock (Floodgate) players into AuthMe on join.
@@ -41,6 +54,11 @@ auth:
   # Ticks to wait after join before logging the player into AuthMe. Increase
   # if another plugin processes the join late. (20 ticks = 1 second.)
   login-delay-ticks: 5
+
+mojang:
+  # Direct Mojang API tuning for premium-name detection.
+  request-timeout-ms: 5000
+  cache-seconds: 600
 
 database:
   # SQLite file inside the plugin folder.

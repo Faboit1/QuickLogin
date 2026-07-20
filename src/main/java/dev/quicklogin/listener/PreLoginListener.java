@@ -59,17 +59,20 @@ public final class PreLoginListener implements Listener {
         UUID uuid = event.getUniqueId();
 
         boolean bedrock = config.floodgateEnabled() && floodgate != null && floodgate.isBedrockPlayer(uuid);
-        boolean verifiedPremium = config.premiumEnabled() && uuid.version() == 4;
+        // Premium: either an already-Mojang-verified UUID (online/proxy) or a player AuthMe
+        // just cryptographically verified via its own handshake this connection.
+        boolean verifiedPremium = config.premiumEnabled()
+                && (uuid.version() == 4 || preJoinHook.getVerifiedPremiumUuid(name) != null);
 
         if (!bedrock && !verifiedPremium) {
-            return; // Normal player: let AuthMe show its dialog.
+            return; // Normal / unverified player: let AuthMe show its dialog.
         }
 
+        String type = bedrock ? "Bedrock" : "premium";
         if (config.debug()) {
-            logger.info("Pre-login '" + name + "' (" + (bedrock ? "Bedrock" : "verified premium")
-                    + "): will approve through pre-join dialog.");
+            logger.info("Pre-login '" + name + "' (" + type + "): will approve through pre-join dialog.");
         }
-        startApproveLoop(name, bedrock ? "Bedrock" : "premium");
+        startApproveLoop(name, type);
     }
 
     /**

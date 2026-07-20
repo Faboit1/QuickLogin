@@ -8,6 +8,8 @@ import dev.quicklogin.command.QuickLoginCommand;
 import dev.quicklogin.config.QuickLoginConfig;
 import dev.quicklogin.listener.JoinListener;
 import dev.quicklogin.listener.PreLoginListener;
+import dev.quicklogin.listener.PremiumEnrollmentListener;
+import dev.quicklogin.mojang.MojangApiService;
 import dev.quicklogin.storage.Database;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -59,14 +61,26 @@ public final class QuickLoginPlugin extends JavaPlugin {
             getLogger().info("Floodgate not detected; Bedrock auto-login is inactive.");
         }
 
-        // --- AuthMe 6 pre-join dialog hook (config-phase login) ---
+        // --- AuthMe 6 pre-join dialog + premium bridge (reflection) ---
         AuthMeInternalHook preJoinHook = AuthMeInternalHook.create(getLogger(), config.debug());
+
+        // --- Mojang (direct) for premium-name detection ---
+        MojangApiService mojang = new MojangApiService(getLogger(), config.debug(),
+                config.mojangTimeoutMs(), config.mojangCacheSeconds());
 
         // --- Auto-login + listeners ---
         AutoLoginService autoLogin = new AutoLoginService(this, config, database, authme, floodgate);
         getServer().getPluginManager().registerEvents(new JoinListener(autoLogin), this);
         getServer().getPluginManager().registerEvents(
                 new PreLoginListener(this, config, floodgate, preJoinHook), this);
+        if (config.premiumEnabled() && config.premiumAutoEnroll() && preJoinHook.premiumBridgeAvailable()) {
+            getServer().getPluginManager().registerEvents(
+                    new PremiumEnrollmentListener(this, config, mojang, preJoinHook, floodgate), this);
+            getLogger().info("Premium auto-enroll active (players never need /premium).");
+        } else if (config.premiumEnabled() && !preJoinHook.premiumBridgeAvailable()) {
+            getLogger().info("AuthMe premium feature not detected; premium auto-enroll inactive. "
+                    + "Enable 'settings.enablePremium: true' in AuthMe's config.");
+        }
 
         QuickLoginCommand command = new QuickLoginCommand(this);
         if (getCommand("quicklogin") != null) {

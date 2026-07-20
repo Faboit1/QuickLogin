@@ -27,14 +27,27 @@ import java.util.logging.Logger;
 public final class AuthMeInternalHook {
 
     private static final String PRE_JOIN_SERVICE = "fr.xephi.authme.service.PreJoinDialogService";
+    private static final String PREMIUM_VERIFIER = "fr.xephi.authme.service.PremiumLoginVerifier";
+    private static final String PREMIUM_SERVICE = "fr.xephi.authme.service.PremiumService";
+    private static final String PLAYER_CACHE = "fr.xephi.authme.data.auth.PlayerCache";
 
     private final Logger logger;
     private final boolean debug;
 
+    private Object injector;
     private Object preJoinService;
     private Method approveMethod;
     private boolean available;
     private boolean warned;
+
+    // Premium (optional; only present when AuthMe's premium feature is compiled in)
+    private Object premiumVerifier;
+    private Method getVerifiedUuidMethod;
+    private Object premiumService;
+    private Method enablePremiumMethod;
+    private Object playerCache;
+    private Method cacheGetAuthMethod;
+    private Method authIsPremiumMethod;
 
     private AuthMeInternalHook(Logger logger, boolean debug) {
         this.logger = logger;
@@ -54,7 +67,7 @@ public final class AuthMeInternalHook {
             if (authme == null) {
                 return;
             }
-            Object injector = readInjector(authme);
+            this.injector = readInjector(authme);
             if (injector == null) {
                 warnOnce("Could not access AuthMe's injector; pre-join skip disabled.");
                 return;
@@ -70,8 +83,89 @@ public final class AuthMeInternalHook {
             this.approveMethod = serviceClass.getMethod("approvePreJoinForceLogin", String.class);
             this.available = true;
             if (debug) logger.info("AuthMe pre-join hook ready.");
+
+            initPremium();
         } catch (Throwable t) {
             warnOnce("AuthMe pre-join hook unavailable (" + t + "); using join-time fallback only.");
+        }
+    }
+
+    /** Wire up the premium bridge. Optional — absent on builds without the premium feature. */
+    private void initPremium() {
+        try {
+            Class<?> verifierClass = Class.forName(PREMIUM_VERIFIER);
+            Object verifier = getService(injector, verifierClass);
+            Class<?> serviceClass = Class.forName(PREMIUM_SERVICE);
+            Object service = getService(injector, serviceClass);
+            if (verifier == null || service == null) {
+                return;
+            }
+            this.premiumVerifier = verifier;
+            this.getVerifiedUuidMethod = verifierClass.getMethod("getVerifiedUuid", String.class);
+            this.premiumService = service;
+            this.enablePremiumMethod = serviceClass.getMethod("enablePremium",
+                    Class.forName("org.bukkit.entity.Player"));
+
+            Class<?> cacheClass = Class.forName(PLAYER_CACHE);
+            Object cache = getService(injector, cacheClass);
+            if (cache != null) {
+                this.playerCache = cache;
+                this.cacheGetAuthMethod = cacheClass.getMethod("getAuth", String.class);
+                this.authIsPremiumMethod = Class.forName("fr.xephi.authme.data.auth.PlayerAuth")
+                        .getMethod("isPremium");
+            }
+            if (debug) logger.info("AuthMe premium bridge ready.");
+        } catch (Throwable t) {
+            if (debug) logger.info("AuthMe premium bridge unavailable (" + t + ").");
+        }
+    }
+
+    /** @return true if AuthMe already has this player enrolled as premium (premium_uuid set). */
+    public boolean isEnrolledPremium(String name) {
+        if (playerCache == null) {
+            return false;
+        }
+        try {
+            Object auth = cacheGetAuthMethod.invoke(playerCache, name.toLowerCase(Locale.ROOT));
+            if (auth == null) {
+                return false;
+            }
+            Object premium = authIsPremiumMethod.invoke(auth);
+            return premium instanceof Boolean b && b;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public boolean premiumBridgeAvailable() {
+        return premiumVerifier != null && premiumService != null;
+    }
+
+    /**
+     * @return the Mojang UUID AuthMe cryptographically verified for this name on
+     * the current connection, or {@code null} if not (yet) verified.
+     */
+    public java.util.UUID getVerifiedPremiumUuid(String name) {
+        if (premiumVerifier == null) {
+            return null;
+        }
+        try {
+            Object result = getVerifiedUuidMethod.invoke(premiumVerifier, name);
+            return result instanceof java.util.UUID u ? u : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Ask AuthMe to enroll this (registered, logged-in) player into premium mode. */
+    public void enablePremium(org.bukkit.entity.Player player) {
+        if (premiumService == null) {
+            return;
+        }
+        try {
+            enablePremiumMethod.invoke(premiumService, player);
+        } catch (Throwable t) {
+            warnOnce("enablePremium failed (" + t + ").");
         }
     }
 
