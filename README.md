@@ -3,66 +3,78 @@
 **One backend plugin. Auto-registers and auto-logs premium Java players and
 Bedrock (Floodgate) players into [AuthMeReloaded](https://github.com/AuthMe/AuthMeReloaded)** so they never type `/register` or `/login`. Drag-and-drop.
 
-- **Premium Java** → auto-registered (random password stored in SQLite) on first
-  join, auto-logged-in every time after.
-- **Bedrock (Floodgate)** → same, auto-registered/auto-logged-in.
-- **Cracked / unverified** → left to AuthMe's normal `/register` + `/login`.
+- **Premium Java** &rarr; cryptographically verified against Mojang via
+  [PacketEvents](https://github.com/retrooper/packetevents), auto-registered
+  (random password stored in SQLite) on first join, auto-logged-in every time.
+- **Bedrock (Floodgate)** &rarr; same, auto-registered/auto-logged-in.
+- **Cracked / unverified** &rarr; left to AuthMe's normal `/register` + `/login`.
+  Players with expired premium sessions are **not kicked** &mdash; they fall
+  through to AuthMe normally.
 - New accounts get a strong random password, stored in SQLite; players never see it.
 
 ## Install
 
-1. Have **AuthMeReloaded** on the server (required). Add **Floodgate** if you use
-   Bedrock.
-2. Drop `QuickLogin-x.y.z.jar` into `plugins/`.
-3. Start the server. Done — defaults are sane.
+1. Have **AuthMeReloaded** on the server (required).
+2. Install **[PacketEvents](https://github.com/retrooper/packetevents)** for
+   premium auto-login (recommended). Without it, only Bedrock auto-login works.
+3. Add **Floodgate** + **Geyser** if you have Bedrock players.
+4. Drop `QuickLogin-x.y.z.jar` into `plugins/`.
+5. **Important**: set `settings.enablePremium: false` in AuthMe's `config.yml`
+   so AuthMe and QuickLogin don't both try to run the Mojang handshake.
+6. Start the server. Done &mdash; defaults are sane.
 
 On startup QuickLogin logs what it hooked and whether premium/Bedrock auto-login
 are active. Set `debug: true` to log how each player is classified on join.
 
-## How premium detection works (important)
+## How premium verification works
 
-QuickLogin decides a Java player is **premium** when they arrive with a real,
-Mojang-verified UUID (a version-4 UUID). **Something has to verify them first —
-that is not, and cannot be, done by a backend plugin.** Depending on your setup:
+QuickLogin runs the **Mojang encryption handshake** itself using PacketEvents,
+exactly how an online-mode server verifies premium accounts:
 
-- **Single server (no proxy), `online-mode=true`** → the server verifies premium
-  accounts itself. Premium auto-login works. (But then cracked/Bedrock can't join
-  — that's a vanilla limitation.)
-- **Behind Velocity/BungeeCord with the proxy in `online-mode=true`** → the proxy
-  verifies premium accounts and kicks expired/invalid sessions automatically (the
-  exact "failed to verify" prompt), then forwards the real UUID. Premium
-  auto-login works, **and Bedrock via Floodgate works too.** ← recommended
-- **Proxy in `online-mode=false`** (to allow *cracked* Java players) → nothing
-  verifies premium accounts, so no backend plugin can distinguish a real premium
-  account from someone typing that name. In this mode only **Bedrock** auto-login
-  works; premium auto-login is impossible without a proxy-side plugin.
+1. A player connects &rarr; QuickLogin intercepts `LOGIN_START`
+2. Mojang API lookup: is this username a paid account?
+3. If yes: send `EncryptionRequest` (RSA challenge), handle
+   `EncryptionResponse` (decrypt shared secret, install AES/CFB8 ciphers),
+   verify via Mojang's `hasJoined` session endpoint
+4. Verified &rarr; approved through AuthMe's pre-join dialog, auto-registered
+   and auto-logged-in
+5. If the session is expired/invalid, or the name isn't premium &rarr; falls
+   through to AuthMe's normal `/register` + `/login` (no kick)
 
-If premium players aren't auto-logging in, enable `debug` — you'll see
-`uuid=... (v3)` for them, which means your proxy is in offline mode.
+This works on **offline-mode servers** (standalone or behind a proxy) &mdash;
+no proxy plugin needed, no `/premium` command, fully automatic.
 
-> Requires **modern player-info forwarding** between the proxy and the backend
-> (the standard Velocity + Paper setup) so the real UUID reaches the backend.
+## AuthMe 6 pre-join dialog support
 
-## Expired / invalid premium session → kick
+AuthMe 6 shows a login dialog during the connection's configuration phase
+(before the player is fully online). QuickLogin approves trusted players
+(Bedrock and verified premium) through this dialog automatically so it never
+appears for them, while normal players still get it.
 
-This is handled automatically by online-mode verification (the proxy or a
-standalone online-mode server): an expired session never passes the login phase,
-so the player is kicked upstream with the standard prompt. The backend never sees
-them, so there is nothing for this plugin to do here.
+Set `auth.skip-prejoin-dialog: true` (the default) to enable this.
 
 ## Configuration (`plugins/QuickLogin/config.yml`)
 
 ```yaml
 premium:
-  enabled: true               # auto-login players with a Mojang-verified (v4) UUID
+  enabled: true               # Mojang handshake via PacketEvents
+
 floodgate:
   enabled: true               # auto-login Bedrock players
+
 auth:
   auto-register: true         # register new trusted players automatically
-  generated-password-length: 32
+  skip-prejoin-dialog: true   # approve trusted players through AuthMe 6's dialog
+  generated-password-length: 16
   login-delay-ticks: 5        # wait after join before logging in (raise if needed)
+
+mojang:
+  request-timeout-ms: 5000
+  cache-seconds: 600
+
 database:
   file: "quicklogin.db"
+
 debug: false
 ```
 
@@ -82,12 +94,12 @@ Permission: `quicklogin.admin` (default: OP). Alias: `/ql`.
 
 | Component | Required? |
 |-----------|-----------|
-| Paper/Spigot 1.20.1 – 1.21.x | ✅ |
-| AuthMeReloaded | ✅ |
-| Floodgate | ⛄ optional (needed on the backend for Bedrock detection) |
+| Paper/Spigot 1.20.1 &ndash; 1.21.x | Yes |
+| AuthMeReloaded | Yes |
+| PacketEvents 2.x | Recommended (needed for premium auto-login) |
+| Floodgate | Optional (needed for Bedrock auto-login) |
 
-SQLite is bundled in the jar. For premium skins on an offline network, pair with
-**SkinsRestorer** as usual.
+SQLite is bundled in the jar.
 
 ## Building
 
