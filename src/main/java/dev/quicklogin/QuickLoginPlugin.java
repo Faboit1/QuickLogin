@@ -85,8 +85,9 @@ public final class QuickLoginPlugin extends JavaPlugin {
         boolean premiumActive = false;
         if (config.premiumEnabled()) {
             if (behindProxy) {
-                getLogger().info("Proxy detected — skipping PacketEvents handshake. "
-                        + "Premium players will be detected by their forwarded v4 UUID.");
+                getLogger().info("Proxy mode — PacketEvents handshake disabled. "
+                        + "Premium players are detected by their forwarded v4 UUID "
+                        + "(requires your proxy in online-mode).");
             } else {
                 premiumActive = registerPremiumHandshake(premiumVerifier, mojang);
             }
@@ -133,11 +134,11 @@ public final class QuickLoginPlugin extends JavaPlugin {
     private boolean detectProxy() {
         String setting = config.premiumProxy();
         if ("true".equals(setting)) {
-            if (config.debug()) getLogger().info("premium.proxy forced to true.");
+            getLogger().info("premium.proxy = true (forced proxy mode).");
             return true;
         }
         if ("false".equals(setting)) {
-            if (config.debug()) getLogger().info("premium.proxy forced to false.");
+            getLogger().info("premium.proxy = false (forced standalone mode).");
             return false;
         }
         // auto-detect
@@ -150,10 +151,9 @@ public final class QuickLoginPlugin extends JavaPlugin {
         boolean velocity = detectVelocity();
 
         boolean result = bungeecord || velocity;
-        if (config.debug()) {
-            getLogger().info("Proxy auto-detect: bungeecord=" + bungeecord
-                    + ", velocity=" + velocity + " → " + (result ? "proxy" : "standalone"));
-        }
+        getLogger().info("Proxy auto-detect: spigot bungeecord=" + bungeecord
+                + ", paper velocity=" + velocity + " → " + (result ? "PROXY mode" : "STANDALONE mode")
+                + ". Override with 'premium.proxy: true/false' in config.yml if wrong.");
         return result;
     }
 
