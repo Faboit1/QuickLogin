@@ -71,8 +71,9 @@ public final class AutoLoginService {
         UUID uuid = player.getUniqueId();
 
         boolean bedrock = config.floodgateEnabled()
-                && floodgate != null
-                && floodgate.isBedrockPlayer(player);
+                && (floodgate != null
+                    ? floodgate.isBedrockPlayer(player)
+                    : FloodgateHook.hasFloodgateUuid(uuid));
 
         boolean isPremium = !bedrock
                 && config.premiumEnabled()
@@ -84,7 +85,7 @@ public final class AutoLoginService {
 
         if (config.debug()) {
             logger.info("Join '" + name + "': uuid=" + uuid + " (v" + uuid.version() + "), "
-                    + "floodgate=" + (floodgate != null && floodgate.isBedrockPlayer(player))
+                    + "floodgate=" + bedrock
                     + ", verified=" + this.premium.isVerified(name)
                     + ", proxyMode=" + proxyMode
                     + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM"
@@ -103,7 +104,7 @@ public final class AutoLoginService {
             if (needsProxyCheck) {
                 MojangApiService.Result result = mojang.lookup(name);
                 finalPremium = result == MojangApiService.Result.PREMIUM;
-                logger.info("[QuickLogin] Proxy premium check for '" + name + "': " + result
+                logger.info("Proxy premium check for '" + name + "': " + result
                         + (finalPremium ? " → will auto-login" : " → leaving to AuthMe"));
                 if (!finalPremium) {
                     return;

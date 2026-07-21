@@ -66,7 +66,10 @@ public final class PreLoginListener implements Listener {
         String name = event.getName();
         UUID uuid = event.getUniqueId();
 
-        boolean bedrock = config.floodgateEnabled() && floodgate != null && floodgate.isBedrockPlayer(uuid);
+        boolean bedrock = config.floodgateEnabled()
+                && (floodgate != null
+                    ? floodgate.isBedrockPlayer(uuid)
+                    : FloodgateHook.hasFloodgateUuid(uuid));
         boolean verifiedPremium = config.premiumEnabled()
                 && (uuid.version() == 4 || premium.isVerified(name));
 
@@ -75,7 +78,7 @@ public final class PreLoginListener implements Listener {
             MojangApiService.Result result = mojang.lookup(name);
             verifiedPremium = result == MojangApiService.Result.PREMIUM;
             if (config.debug()) {
-                logger.info("[QuickLogin] Pre-login proxy check for '" + name + "': " + result);
+                logger.info("Pre-login proxy check for '" + name + "': " + result);
             }
         }
 

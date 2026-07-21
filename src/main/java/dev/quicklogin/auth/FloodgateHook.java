@@ -48,13 +48,23 @@ public final class FloodgateHook {
     public boolean isBedrockPlayer(UUID uuid) {
         try {
             Object result = isFloodgatePlayer.invoke(api, uuid);
-            return result instanceof Boolean b && b;
-        } catch (Throwable t) {
-            return false;
-        }
+            if (result instanceof Boolean b && b) return true;
+        } catch (Throwable ignored) {}
+        return hasFloodgateUuid(uuid);
     }
 
     public boolean isBedrockPlayer(Player player) {
         return isBedrockPlayer(player.getUniqueId());
+    }
+
+    /**
+     * Floodgate assigns UUIDs with all-zero most-significant 64 bits
+     * (e.g. {@code 00000000-0000-0000-0009-01fba7a59b65}). Java v3/v4
+     * UUIDs never have this format, so it is a reliable fallback when
+     * {@code FloodgateApi.isFloodgatePlayer()} returns false (which
+     * happens behind a proxy when the player isn't in the API cache yet).
+     */
+    public static boolean hasFloodgateUuid(UUID uuid) {
+        return uuid.getMostSignificantBits() == 0;
     }
 }
