@@ -1,6 +1,7 @@
 package dev.quicklogin.command;
 
 import dev.quicklogin.QuickLoginPlugin;
+import dev.quicklogin.mojang.MojangApiService;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -11,7 +12,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * {@code /quicklogin <reload|status|reset <player>>}.
+ * {@code /quicklogin <reload|status|reset <player>|check <name>>}.
  */
 public final class QuickLoginCommand implements CommandExecutor, TabCompleter {
 
@@ -26,7 +27,7 @@ public final class QuickLoginCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§7Usage: §f/" + label + " <reload|status|reset <player>>");
+            sender.sendMessage(PREFIX + "§7Usage: §f/" + label + " <reload|status|reset|check>");
             return true;
         }
 
@@ -38,9 +39,32 @@ public final class QuickLoginCommand implements CommandExecutor, TabCompleter {
             case "status" -> {
                 sender.sendMessage(PREFIX + "§7QuickLogin §fv" + plugin.getDescription().getVersion());
                 sender.sendMessage("§7 • Premium login: " + onOff(plugin.config().premiumEnabled()));
+                sender.sendMessage("§7 • Proxy mode: " + onOff(plugin.isProxyMode())
+                        + (plugin.isProxyMode() ? " §7(Mojang API name lookup)" : " §7(PacketEvents handshake)"));
                 sender.sendMessage("§7 • Floodgate login: " + onOff(plugin.config().floodgateEnabled()
                         && plugin.hasFloodgate()));
                 sender.sendMessage("§7 • AuthMe hooked: " + onOff(true));
+            }
+            case "check" -> {
+                if (args.length < 2) {
+                    sender.sendMessage(PREFIX + "§cUsage: /" + label + " check <username>");
+                    return true;
+                }
+                String target = args[1];
+                MojangApiService mojang = plugin.getMojang();
+                if (mojang == null) {
+                    sender.sendMessage(PREFIX + "§cMojang API service not available.");
+                    return true;
+                }
+                sender.sendMessage(PREFIX + "§7Checking Mojang API for '§f" + target + "§7'...");
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    MojangApiService.Result result = mojang.lookup(target);
+                    switch (result) {
+                        case PREMIUM -> sender.sendMessage(PREFIX + "§a'" + target + "' is a PREMIUM (paid) Mojang account.");
+                        case CRACKED -> sender.sendMessage(PREFIX + "§e'" + target + "' is NOT a premium account (cracked/free).");
+                        case UNKNOWN -> sender.sendMessage(PREFIX + "§c'" + target + "' — Mojang API error! Check server console for details.");
+                    }
+                });
             }
             case "reset" -> {
                 if (args.length < 2) {
@@ -55,7 +79,7 @@ public final class QuickLoginCommand implements CommandExecutor, TabCompleter {
                             : "§eNo stored record found for §f" + target + "§e."));
                 });
             }
-            default -> sender.sendMessage(PREFIX + "§cUnknown subcommand. Use reload, status or reset.");
+            default -> sender.sendMessage(PREFIX + "§cUnknown subcommand. Use reload, status, reset or check.");
         }
         return true;
     }
@@ -67,7 +91,7 @@ public final class QuickLoginCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return List.of("reload", "status", "reset");
+            return List.of("reload", "status", "reset", "check");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("reset")) {
             return Bukkit.getOnlinePlayers().stream().map(p -> p.getName()).toList();

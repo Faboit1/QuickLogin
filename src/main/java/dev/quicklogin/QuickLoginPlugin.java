@@ -38,6 +38,8 @@ public final class QuickLoginPlugin extends JavaPlugin {
     private FloodgateHook floodgate;
     private ExecutorService workers;
     private PremiumHandshakeListener premiumListener;
+    private MojangApiService mojang;
+    private boolean proxyMode;
 
     @Override
     public void onEnable() {
@@ -74,12 +76,13 @@ public final class QuickLoginPlugin extends JavaPlugin {
 
         // --- Mojang (direct) + premium verifier ---
         this.workers = Executors.newFixedThreadPool(3, daemonThreads());
-        MojangApiService mojang = new MojangApiService(getLogger(), config.debug(),
+        this.mojang = new MojangApiService(getLogger(), config.debug(),
                 config.mojangTimeoutMs(), config.mojangCacheSeconds());
         PremiumVerifier premiumVerifier = new PremiumVerifier(mojang, workers);
 
         // --- Proxy detection ---
         boolean behindProxy = detectProxy();
+        this.proxyMode = behindProxy;
 
         // --- Premium handshake (PacketEvents, standalone only) ---
         boolean premiumActive = false;
@@ -222,6 +225,14 @@ public final class QuickLoginPlugin extends JavaPlugin {
 
     public boolean hasFloodgate() {
         return floodgate != null;
+    }
+
+    public boolean isProxyMode() {
+        return proxyMode;
+    }
+
+    public MojangApiService getMojang() {
+        return mojang;
     }
 
     public void reloadPluginConfig() {

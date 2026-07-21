@@ -103,9 +103,8 @@ public final class AutoLoginService {
             if (needsProxyCheck) {
                 MojangApiService.Result result = mojang.lookup(name);
                 finalPremium = result == MojangApiService.Result.PREMIUM;
-                if (config.debug()) {
-                    logger.info("Proxy Mojang API check for '" + name + "': " + result);
-                }
+                logger.info("[QuickLogin] Proxy premium check for '" + name + "': " + result
+                        + (finalPremium ? " → will auto-login" : " → leaving to AuthMe"));
                 if (!finalPremium) {
                     return;
                 }

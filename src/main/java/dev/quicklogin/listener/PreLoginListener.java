@@ -72,7 +72,11 @@ public final class PreLoginListener implements Listener {
 
         // Proxy mode: this event runs async, so a blocking Mojang API check is safe
         if (!bedrock && !verifiedPremium && proxyMode && config.premiumEnabled() && mojang != null) {
-            verifiedPremium = mojang.lookup(name) == MojangApiService.Result.PREMIUM;
+            MojangApiService.Result result = mojang.lookup(name);
+            verifiedPremium = result == MojangApiService.Result.PREMIUM;
+            if (config.debug()) {
+                logger.info("[QuickLogin] Pre-login proxy check for '" + name + "': " + result);
+            }
         }
 
         if (!bedrock && !verifiedPremium) {

@@ -75,11 +75,12 @@ public final class MojangApiService {
             } else if (code == 204 || code == 404) {
                 result = Result.CRACKED;
             } else {
-                if (debug) logger.warning("Mojang lookup for '" + name + "' returned " + code);
+                logger.warning("[QuickLogin] Mojang API returned HTTP " + code + " for '" + name
+                        + "' — premium check skipped for this player.");
                 return Result.UNKNOWN;
             }
         } catch (Exception e) {
-            if (debug) logger.warning("Mojang lookup failed for '" + name + "': " + e);
+            logger.warning("[QuickLogin] Mojang API unreachable for '" + name + "': " + e.getMessage());
             return Result.UNKNOWN;
         }
 
