@@ -15,17 +15,28 @@ config-version: 2
 
 premium:
   # Verify paid (Mojang/Microsoft) Java accounts and auto-register/auto-login
-  # them with zero friction. QuickLogin performs the real Mojang encryption
-  # handshake itself (via PacketEvents), exactly like an online-mode server:
-  # a premium account is cryptographically verified against Mojang, then
-  # approved through AuthMe's pre-join dialog and auto-registered/logged-in.
+  # them with zero friction.
+  #
+  # Standalone (no proxy): QuickLogin performs the real Mojang encryption
+  # handshake itself (via PacketEvents). Requires PacketEvents installed.
+  # IMPORTANT: set 'settings.enablePremium: false' in AuthMe's config so the
+  # two don't both run the handshake.
+  #
+  # Behind a proxy (BungeeCord/Velocity): the proxy already verifies premium
+  # players, so QuickLogin detects them by their forwarded v4 UUID — no
+  # handshake is needed. Make sure the proxy is in online-mode and player
+  # forwarding is configured (velocity modern forwarding or bungeecord: true).
+  #
   # Cracked players and expired/invalid sessions fall through to AuthMe's
   # normal login (they are NOT kicked).
-  #
-  # Requires PacketEvents installed. IMPORTANT: if you use this, set
-  # 'settings.enablePremium: false' in AuthMe's config so the two don't both
-  # run the handshake.
   enabled: true
+
+  # How QuickLogin detects whether to use its own Mojang handshake or rely
+  # on the proxy's forwarded UUID:
+  #   auto  - check spigot.yml (bungeecord) and Paper config (velocity)
+  #   true  - force proxy mode (skip handshake, use forwarded UUID)
+  #   false - force standalone mode (do the Mojang handshake via PacketEvents)
+  proxy: auto
 
 floodgate:
   # Auto-login Bedrock (Floodgate) players into AuthMe on join.

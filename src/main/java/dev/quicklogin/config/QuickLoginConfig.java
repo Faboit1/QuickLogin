@@ -8,6 +8,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 public final class QuickLoginConfig {
 
     private final boolean premiumEnabled;
+    private final String premiumProxy;
     private final boolean premiumAutoEnroll;
     private final boolean floodgateEnabled;
     private final boolean authAutoRegister;
@@ -21,6 +22,7 @@ public final class QuickLoginConfig {
 
     private QuickLoginConfig(FileConfiguration c) {
         this.premiumEnabled = c.getBoolean("premium.enabled", true);
+        this.premiumProxy = c.getString("premium.proxy", "auto").toLowerCase(java.util.Locale.ROOT);
         this.premiumAutoEnroll = c.getBoolean("premium.auto-enroll", true);
         this.floodgateEnabled = c.getBoolean("floodgate.enabled", true);
         this.authAutoRegister = c.getBoolean("auth.auto-register", true);
@@ -52,5 +54,6 @@ public final class QuickLoginConfig {
     public int generatedPasswordLength() { return generatedPasswordLength; }
     public int loginDelayTicks() { return loginDelayTicks; }
     public String databaseFile() { return databaseFile; }
+    public String premiumProxy() { return premiumProxy; }
     public boolean debug() { return debug; }
 }

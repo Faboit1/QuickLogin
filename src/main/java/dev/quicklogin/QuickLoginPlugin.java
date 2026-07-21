@@ -78,10 +78,18 @@ public final class QuickLoginPlugin extends JavaPlugin {
                 config.mojangTimeoutMs(), config.mojangCacheSeconds());
         PremiumVerifier premiumVerifier = new PremiumVerifier(mojang, workers);
 
-        // --- Premium handshake (PacketEvents) ---
+        // --- Proxy detection ---
+        boolean behindProxy = detectProxy();
+
+        // --- Premium handshake (PacketEvents, standalone only) ---
         boolean premiumActive = false;
         if (config.premiumEnabled()) {
-            premiumActive = registerPremiumHandshake(premiumVerifier, mojang);
+            if (behindProxy) {
+                getLogger().info("Proxy detected — skipping PacketEvents handshake. "
+                        + "Premium players will be detected by their forwarded v4 UUID.");
+            } else {
+                premiumActive = registerPremiumHandshake(premiumVerifier, mojang);
+            }
         }
 
         // --- Auto-login + listeners ---
@@ -96,14 +104,70 @@ public final class QuickLoginPlugin extends JavaPlugin {
             getCommand("quicklogin").setTabCompleter(command);
         }
 
+        String premiumStatus;
+        if (!config.premiumEnabled()) {
+            premiumStatus = "disabled";
+        } else if (behindProxy) {
+            premiumStatus = "active (proxy/UUID)";
+        } else if (premiumActive) {
+            premiumStatus = "active (PacketEvents)";
+        } else {
+            premiumStatus = "inactive";
+        }
+
         getLogger().info("QuickLogin enabled. AuthMe: hooked"
                 + " | Floodgate: " + (floodgate != null ? "hooked" : "not found")
                 + " | pre-join dialog hook: " + (preJoinHook.isAvailable() ? "active" : "unavailable")
-                + " | premium verification: " + (premiumActive ? "active (PacketEvents)" : "inactive")
+                + " | premium: " + premiumStatus
                 + " | Bedrock auto-login: " + (config.floodgateEnabled() && floodgate != null ? "on" : "off"));
-        if (config.premiumEnabled() && premiumActive) {
+        if (config.premiumEnabled() && premiumActive && !behindProxy) {
             getLogger().info("IMPORTANT: QuickLogin now performs premium verification itself. "
                     + "Set 'settings.enablePremium: false' in AuthMe's config to avoid a double handshake.");
+        }
+    }
+
+    /**
+     * Determine whether this server is behind a BungeeCord/Velocity proxy.
+     * Config values: "true" forces proxy, "false" forces standalone, "auto" auto-detects.
+     */
+    private boolean detectProxy() {
+        String setting = config.premiumProxy();
+        if ("true".equals(setting)) {
+            if (config.debug()) getLogger().info("premium.proxy forced to true.");
+            return true;
+        }
+        if ("false".equals(setting)) {
+            if (config.debug()) getLogger().info("premium.proxy forced to false.");
+            return false;
+        }
+        // auto-detect
+        boolean bungeecord = false;
+        try {
+            bungeecord = getServer().spigot().getConfig()
+                    .getBoolean("settings.bungeecord", false);
+        } catch (Throwable ignored) { }
+
+        boolean velocity = detectVelocity();
+
+        boolean result = bungeecord || velocity;
+        if (config.debug()) {
+            getLogger().info("Proxy auto-detect: bungeecord=" + bungeecord
+                    + ", velocity=" + velocity + " → " + (result ? "proxy" : "standalone"));
+        }
+        return result;
+    }
+
+    private boolean detectVelocity() {
+        try {
+            Class<?> globalConfig = Class.forName(
+                    "io.papermc.paper.configuration.GlobalConfiguration");
+            Object instance = globalConfig.getMethod("get").invoke(null);
+            Object proxies = globalConfig.getField("proxies").get(instance);
+            Object velocityObj = proxies.getClass().getField("velocity").get(proxies);
+            Object enabled = velocityObj.getClass().getField("enabled").get(velocityObj);
+            return enabled instanceof Boolean b && b;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
