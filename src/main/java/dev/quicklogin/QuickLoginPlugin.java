@@ -85,19 +85,20 @@ public final class QuickLoginPlugin extends JavaPlugin {
         boolean premiumActive = false;
         if (config.premiumEnabled()) {
             if (behindProxy) {
-                getLogger().info("Proxy mode — PacketEvents handshake disabled. "
-                        + "Premium players are detected by their forwarded v4 UUID "
-                        + "(requires your proxy in online-mode).");
+                getLogger().info("Proxy mode — premium detected via Mojang API name lookup. "
+                        + "PacketEvents handshake skipped (not possible behind a proxy).");
             } else {
                 premiumActive = registerPremiumHandshake(premiumVerifier, mojang);
             }
         }
 
         // --- Auto-login + listeners ---
-        AutoLoginService autoLogin = new AutoLoginService(this, config, database, authme, floodgate, premiumVerifier);
+        AutoLoginService autoLogin = new AutoLoginService(
+                this, config, database, authme, floodgate, premiumVerifier, behindProxy, mojang);
         getServer().getPluginManager().registerEvents(new JoinListener(autoLogin), this);
         getServer().getPluginManager().registerEvents(
-                new PreLoginListener(this, config, floodgate, preJoinHook, premiumVerifier), this);
+                new PreLoginListener(this, config, floodgate, preJoinHook, premiumVerifier,
+                        behindProxy, mojang), this);
 
         QuickLoginCommand command = new QuickLoginCommand(this);
         if (getCommand("quicklogin") != null) {
@@ -109,7 +110,7 @@ public final class QuickLoginPlugin extends JavaPlugin {
         if (!config.premiumEnabled()) {
             premiumStatus = "disabled";
         } else if (behindProxy) {
-            premiumStatus = "active (proxy/UUID)";
+            premiumStatus = "active (proxy/Mojang API)";
         } else if (premiumActive) {
             premiumStatus = "active (PacketEvents)";
         } else {

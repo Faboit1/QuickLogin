@@ -3,6 +3,7 @@ package dev.quicklogin.listener;
 import dev.quicklogin.auth.AuthMeInternalHook;
 import dev.quicklogin.auth.FloodgateHook;
 import dev.quicklogin.config.QuickLoginConfig;
+import dev.quicklogin.mojang.MojangApiService;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.event.EventHandler;
@@ -37,15 +38,20 @@ public final class PreLoginListener implements Listener {
     private final FloodgateHook floodgate;         // may be null
     private final AuthMeInternalHook preJoinHook;
     private final dev.quicklogin.premium.PremiumVerifier premium;
+    private final boolean proxyMode;
+    private final MojangApiService mojang;           // may be null
 
     public PreLoginListener(Plugin plugin, QuickLoginConfig config, FloodgateHook floodgate,
-                            AuthMeInternalHook preJoinHook, dev.quicklogin.premium.PremiumVerifier premium) {
+                            AuthMeInternalHook preJoinHook, dev.quicklogin.premium.PremiumVerifier premium,
+                            boolean proxyMode, MojangApiService mojang) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
         this.floodgate = floodgate;
         this.preJoinHook = preJoinHook;
         this.premium = premium;
+        this.proxyMode = proxyMode;
+        this.mojang = mojang;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -61,13 +67,16 @@ public final class PreLoginListener implements Listener {
         UUID uuid = event.getUniqueId();
 
         boolean bedrock = config.floodgateEnabled() && floodgate != null && floodgate.isBedrockPlayer(uuid);
-        // Premium: an already-Mojang-verified UUID (online/proxy), or a player QuickLogin just
-        // cryptographically verified via the PacketEvents handshake on this connection.
         boolean verifiedPremium = config.premiumEnabled()
                 && (uuid.version() == 4 || premium.isVerified(name));
 
+        // Proxy mode: this event runs async, so a blocking Mojang API check is safe
+        if (!bedrock && !verifiedPremium && proxyMode && config.premiumEnabled() && mojang != null) {
+            verifiedPremium = mojang.lookup(name) == MojangApiService.Result.PREMIUM;
+        }
+
         if (!bedrock && !verifiedPremium) {
-            return; // Normal / unverified player: let AuthMe show its dialog.
+            return;
         }
 
         String type = bedrock ? "Bedrock" : "premium";

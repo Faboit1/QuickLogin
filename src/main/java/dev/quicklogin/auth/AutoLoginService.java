@@ -1,6 +1,7 @@
 package dev.quicklogin.auth;
 
 import dev.quicklogin.config.QuickLoginConfig;
+import dev.quicklogin.mojang.MojangApiService;
 import dev.quicklogin.storage.Database;
 import dev.quicklogin.storage.PlayerData;
 import org.bukkit.Bukkit;
@@ -46,10 +47,13 @@ public final class AutoLoginService {
     private final AuthMeHook authme;
     private final FloodgateHook floodgate;   // may be null
     private final dev.quicklogin.premium.PremiumVerifier premium;
+    private final boolean proxyMode;
+    private final MojangApiService mojang;   // may be null
     private final SecureRandom random = new SecureRandom();
 
     public AutoLoginService(Plugin plugin, QuickLoginConfig config, Database db, AuthMeHook authme,
-                            FloodgateHook floodgate, dev.quicklogin.premium.PremiumVerifier premium) {
+                            FloodgateHook floodgate, dev.quicklogin.premium.PremiumVerifier premium,
+                            boolean proxyMode, MojangApiService mojang) {
         this.plugin = plugin;
         this.logger = plugin.getLogger();
         this.config = config;
@@ -57,6 +61,8 @@ public final class AutoLoginService {
         this.authme = authme;
         this.floodgate = floodgate;
         this.premium = premium;
+        this.proxyMode = proxyMode;
+        this.mojang = mojang;
     }
 
     public void onJoin(Player player) {
@@ -68,28 +74,47 @@ public final class AutoLoginService {
                 && floodgate != null
                 && floodgate.isBedrockPlayer(player);
 
-        // Premium = a Mojang-verified v4 UUID (online/proxy) OR a name QuickLogin's
-        // PacketEvents handshake cryptographically verified this connection.
         boolean isPremium = !bedrock
                 && config.premiumEnabled()
                 && (uuid.version() == 4 || this.premium.isVerified(name));
+
+        // In proxy mode we may need an async Mojang API lookup to detect premium
+        boolean needsProxyCheck = !bedrock && !isPremium
+                && proxyMode && config.premiumEnabled() && mojang != null;
 
         if (config.debug()) {
             logger.info("Join '" + name + "': uuid=" + uuid + " (v" + uuid.version() + "), "
                     + "floodgate=" + (floodgate != null && floodgate.isBedrockPlayer(player))
                     + ", verified=" + this.premium.isVerified(name)
-                    + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM" : "cracked (ignored)"));
+                    + ", proxyMode=" + proxyMode
+                    + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM"
+                            : needsProxyCheck ? "proxy check" : "cracked (ignored)"));
         }
 
-        if (!bedrock && !isPremium) {
-            return; // Cracked / unverified: AuthMe handles normally.
+        if (!bedrock && !isPremium && !needsProxyCheck) {
+            return;
         }
 
         final boolean premiumFlag = isPremium;
-        final String type = bedrock ? "Bedrock" : "premium";
-        final String uuidStr = uuid.toString();
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            boolean finalPremium = premiumFlag;
+
+            if (needsProxyCheck) {
+                MojangApiService.Result result = mojang.lookup(name);
+                finalPremium = result == MojangApiService.Result.PREMIUM;
+                if (config.debug()) {
+                    logger.info("Proxy Mojang API check for '" + name + "': " + result);
+                }
+                if (!finalPremium) {
+                    return;
+                }
+            }
+
+            final String type = bedrock ? "Bedrock" : "premium";
+            final String uuidStr = uuid.toString();
+            final boolean storedPremium = finalPremium;
+
             long now = System.currentTimeMillis();
             PlayerData existing = db.find(lower);
             String password;
@@ -103,7 +128,7 @@ public final class AutoLoginService {
                 firstSeen = existing.firstSeen();
             }
 
-            boolean premiumStored = premiumFlag || (existing != null && existing.premium());
+            boolean premiumStored = storedPremium || (existing != null && existing.premium());
             db.save(new PlayerData(lower, name, uuidStr, premiumStored, password, firstSeen, now));
 
             final String pw = password;

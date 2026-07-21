@@ -3,12 +3,6 @@
 # ---------------------------------------------------------------------
 #  Auto-registers/auto-logs premium Java players and Bedrock (Floodgate)
 #  players into AuthMeReloaded.
-#
-#  Premium players are those who arrive already Mojang-verified (a real
-#  version-4 UUID). That verification is done by online-mode login (your
-#  proxy in online-mode, or a standalone online-mode server) - not by this
-#  plugin. Behind a proxy, this requires modern player-info forwarding so
-#  the real UUID reaches the backend. See the README for details.
 # =====================================================================
 
 config-version: 2
@@ -22,20 +16,19 @@ premium:
   # IMPORTANT: set 'settings.enablePremium: false' in AuthMe's config so the
   # two don't both run the handshake.
   #
-  # Behind a proxy (BungeeCord/Velocity): the proxy already verifies premium
-  # players, so QuickLogin detects them by their forwarded v4 UUID — no
-  # handshake is needed. Make sure the proxy is in online-mode and player
-  # forwarding is configured (velocity modern forwarding or bungeecord: true).
+  # Behind a proxy (BungeeCord/Velocity in offline-mode): QuickLogin detects
+  # premium players by checking the Mojang API for the username. This works
+  # with offline-mode proxies - cracked players can still join normally.
   #
   # Cracked players and expired/invalid sessions fall through to AuthMe's
   # normal login (they are NOT kicked).
   enabled: true
 
-  # How QuickLogin detects whether to use its own Mojang handshake or rely
-  # on the proxy's forwarded UUID:
+  # How QuickLogin detects whether it is behind a proxy:
   #   auto  - check spigot.yml (bungeecord) and Paper config (velocity)
-  #   true  - force proxy mode (skip handshake, use forwarded UUID)
-  #   false - force standalone mode (do the Mojang handshake via PacketEvents)
+  #   true  - force proxy mode (Mojang API name lookup, no handshake)
+  #   false - force standalone mode (full Mojang handshake via PacketEvents)
+  # If auto-detect gets it wrong, set this explicitly.
   proxy: auto
 
 floodgate:
