@@ -36,13 +36,8 @@ public final class AutoLoginService {
     private static final char[] CHARSET =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
 
-    /**
-     * Number of login/verification passes. We keep re-checking even after a
-     * success because AuthMe can knock a just-logged-in player back into limbo
-     * a moment after join (observed with Floodgate/Bedrock, whose join handling
-     * lands after ours). ~7 passes * 15 ticks ≈ 5s of coverage.
-     */
-    private static final int MAX_ATTEMPTS = 7;
+    /** Extra login attempts (beyond the first) if AuthMe hasn't taken it yet. */
+    private static final int MAX_ATTEMPTS = 4;
     private static final long RETRY_INTERVAL_TICKS = 15L;
 
     private final Plugin plugin;
@@ -148,28 +143,32 @@ public final class AutoLoginService {
                 return;
             }
 
-            // Only act when the player isn't currently logged in. We still keep
-            // scheduling passes below even on success, so a later knock-out by
-            // AuthMe's own join handling gets corrected on the next pass.
-            if (!authme.isAuthenticated(player)) {
-                if (!authme.isRegistered(name)) {
-                    if (!config.authAutoRegister()) {
-                        return; // not registered and auto-register disabled: leave to AuthMe.
-                    }
-                    boolean reg = authme.forceRegister(player, password);
-                    logger.info("Auto-registered " + type + " player '" + name + "'"
-                            + (reg ? "." : " FAILED."));
-                    // forceRegister does not reliably log the player in on AuthMe 6,
-                    // so always follow up with an explicit forceLogin below.
-                }
-                boolean ok = authme.forceLogin(player);
-                if (config.debug()) logger.info("forceLogin(" + name + ") [" + type + "] attempt "
-                        + attempt + " -> " + ok + ", authenticated=" + authme.isAuthenticated(player));
-            } else if (config.debug()) {
-                logger.info("'" + name + "' authenticated (attempt " + attempt + ").");
+            // Already logged in: stop. Never call login again on an authenticated
+            // player — that leaves them stuck (AuthMe says "already logged in"
+            // but never re-runs the limbo restore, so they can't move).
+            if (authme.isAuthenticated(player)) {
+                if (config.debug()) logger.info("'" + name + "' already authenticated.");
+                return;
             }
 
-            if (attempt < MAX_ATTEMPTS) {
+            boolean ok;
+            if (authme.isRegistered(name)) {
+                ok = authme.forceLogin(player);
+                if (config.debug()) logger.info("forceLogin(" + name + ") [" + type + "] attempt "
+                        + attempt + " -> " + ok);
+            } else if (config.authAutoRegister()) {
+                boolean reg = authme.forceRegister(player, password);
+                logger.info("Auto-registered " + type + " player '" + name + "'"
+                        + (reg ? "." : " FAILED."));
+                // AuthMe 6's forceRegister does not reliably log the player in,
+                // so follow up with an explicit forceLogin in the same pass.
+                ok = reg && authme.forceLogin(player);
+            } else {
+                return; // not registered and auto-register disabled: leave to AuthMe.
+            }
+
+            // If it didn't take (AuthMe processed us late), retry a few times.
+            if ((!ok || !authme.isAuthenticated(player)) && attempt < MAX_ATTEMPTS) {
                 scheduleLogin(player, name, password, type, attempt + 1);
             }
         }, delay);
