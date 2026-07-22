@@ -7,15 +7,19 @@
 #    can NOT be copied in the cartography table or the crafting table.
 #  - Normal, non-locked maps clone exactly like vanilla - untouched.
 #
+#  How it blocks the cartography table:
+#    We listen to PrepareInventoryResultEvent and NULL the output the
+#    moment the source map is locked, so no copy is ever generated -
+#    there is nothing in the result slot to take. This is far more
+#    reliable than cancelling the click on the result slot.
+#
 #  A map's "locked" flag is NOT on the item / NBT - it lives on the map
-#  DATA and is only reachable via Bukkit's MapView#isLocked(). SkBee's
-#  NBT tools can't see it, so this uses skript-reflect.
+#  DATA and is only reachable via Bukkit's MapView#isLocked(), so this
+#  uses skript-reflect.
 #
 #  REQUIRES: skript-reflect  https://github.com/SkriptLang/skript-reflect
 #  Tested on: Paper 1.20.x - 1.21.x
-#
-#  >>> If duping still works, run  /maptest  while holding a LOCKED map.
-#      It tells you whether detection works and whether reflect loaded. <<<
+#  Diagnostic:  /maptest  (hold a map to see its locked state)
 # =====================================================================
 
 options:
@@ -23,10 +27,10 @@ options:
 
 import:
     org.bukkit.inventory.meta.MapMeta
+    org.bukkit.event.inventory.PrepareInventoryResultEvent
 
 # Returns the MapView of a filled map, or nothing for anything else.
-# If a guard fails the function returns nothing (unset), which callers treat
-# as "not a map / not detectable".
+# A failed guard makes the function return nothing (treated as "not a map").
 function mapViewOf(i: item) :: object:
     {_i} is set
     set {_meta} to {_i}.getItemMeta()
@@ -35,7 +39,7 @@ function mapViewOf(i: item) :: object:
     return {_meta}.getMapView()
 
 # True only when the item is a filled map whose map data is locked.
-# Compared as text ("true"/"false") to dodge any boolean auto-conversion quirks.
+# Compared as text to dodge any boolean auto-conversion quirks.
 function isLockedMap(i: item) :: boolean:
     set {_view} to mapViewOf({_i})
     {_view} is set
@@ -44,19 +48,26 @@ function isLockedMap(i: item) :: boolean:
 
 
 # ---------------------------------------------------------------------
-#  CARTOGRAPHY TABLE
-#  slot 0 = source map | slot 1 = material | slot 2 = result (the copy)
-#  The dupe happens when the copy is pulled from slot 2, so guard slot 2.
+#  CARTOGRAPHY TABLE - primary block.
+#  Fires whenever the result is (re)calculated. If the source map
+#  (slot 0) is locked, wipe the result so no copy can be produced.
+# ---------------------------------------------------------------------
+on PrepareInventoryResultEvent:
+    set {_inv} to event.getInventory()
+    "%{_inv}.getType()%" is "CARTOGRAPHY"
+    isLockedMap({_inv}.getItem(0)) is true
+    # {_null} is intentionally unset -> passes Java null -> clears the result
+    event.setResult({_null})
+
+
+# ---------------------------------------------------------------------
+#  CARTOGRAPHY TABLE - backup block (in case the result still appears).
+#  Uses the slot TYPE (RESULT), which is layout-independent.
 # ---------------------------------------------------------------------
 on inventory click:
     "%event-inventory.getType()%" is "CARTOGRAPHY"
-    # result / output slot only (raw slot 2 of the top inventory)
-    "%event.getRawSlot()%" is "2"
-    # there is actually a copy sitting in the output
-    event-inventory.getItem(2) is set
-    # ...and the source map (slot 0) is locked
+    "%event.getSlotType()%" is "RESULT"
     isLockedMap(event-inventory.getItem(0)) is true
-    # staff may still copy locked art
     player doesn't have permission "{@bypass-perm}"
     cancel event
     send action bar "&c&lLocked map art can't be copied." to player
@@ -77,7 +88,6 @@ on craft:
 
 # ---------------------------------------------------------------------
 #  DIAGNOSTIC:  /maptest  - hold a map and run this.
-#  Tells you if skript-reflect works and whether the map reads as locked.
 # ---------------------------------------------------------------------
 command /maptest:
     permission: {@bypass-perm}
