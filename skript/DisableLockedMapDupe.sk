@@ -7,68 +7,83 @@
 #    can NOT be copied in the cartography table or the crafting table.
 #  - Normal, non-locked maps clone exactly like vanilla - untouched.
 #
-#  Why reflect?  A map's "locked" flag is NOT stored on the item / NBT,
-#  it lives on the map DATA and is only reachable through the Bukkit API
-#  MapView#isLocked(). SkBee's NBT tools can't see it, so we read it with
-#  skript-reflect.
+#  A map's "locked" flag is NOT on the item / NBT - it lives on the map
+#  DATA and is only reachable via Bukkit's MapView#isLocked(). SkBee's
+#  NBT tools can't see it, so this uses skript-reflect.
 #
-#  Requires: skript-reflect   https://github.com/SkriptLang/skript-reflect
+#  REQUIRES: skript-reflect  https://github.com/SkriptLang/skript-reflect
 #  Tested on: Paper 1.20.x - 1.21.x
 #
-#  Staff bypass permission:  quicklogin.maps.dupebypass
+#  >>> If duping still works, run  /maptest  while holding a LOCKED map.
+#      It tells you whether detection works and whether reflect loaded. <<<
 # =====================================================================
+
+options:
+    bypass-perm: quicklogin.maps.dupebypass
 
 import:
     org.bukkit.inventory.meta.MapMeta
-    org.bukkit.map.MapView
+
+# Returns the MapView of a filled map, or nothing for anything else.
+# If a guard fails the function returns nothing (unset), which callers treat
+# as "not a map / not detectable".
+function mapViewOf(i: item) :: object:
+    {_i} is set
+    set {_meta} to {_i}.getItemMeta()
+    {_meta} is set
+    {_meta} is an instance of MapMeta
+    return {_meta}.getMapView()
 
 # True only when the item is a filled map whose map data is locked.
+# Compared as text ("true"/"false") to dodge any boolean auto-conversion quirks.
 function isLockedMap(i: item) :: boolean:
-    if {_i} is not set:
-        return false
-    set {_meta} to {_i}.getItemMeta()
-    if {_meta} is not set:
-        return false
-    if {_meta} is not an instance of MapMeta:
-        return false
-    set {_view} to {_meta}.getMapView()
-    if {_view} is not set:
-        return false
-    return {_view}.isLocked()
+    set {_view} to mapViewOf({_i})
+    {_view} is set
+    "%{_view}.isLocked()%" is "true"
+    return true
 
 
 # ---------------------------------------------------------------------
 #  CARTOGRAPHY TABLE
-#  slot 0 = source map | slot 1 = material | slot 2 = result (copy)
-#  The dupe happens the moment the copy is pulled from slot 2, so we
-#  only need to guard that one slot.
+#  slot 0 = source map | slot 1 = material | slot 2 = result (the copy)
+#  The dupe happens when the copy is pulled from slot 2, so guard slot 2.
 # ---------------------------------------------------------------------
 on inventory click:
     "%event-inventory.getType()%" is "CARTOGRAPHY"
-    # only the output/result slot matters
-    set {_raw} to event.getRawSlot()
-    {_raw} is 2
+    # result / output slot only (raw slot 2 of the top inventory)
+    "%event.getRawSlot()%" is "2"
     # there is actually a copy sitting in the output
     event-inventory.getItem(2) is set
-    # ...and the source map is locked
+    # ...and the source map (slot 0) is locked
     isLockedMap(event-inventory.getItem(0)) is true
     # staff may still copy locked art
-    player does not have permission "quicklogin.maps.dupebypass"
+    player doesn't have permission "{@bypass-perm}"
     cancel event
     send action bar "&c&lLocked map art can't be copied." to player
 
 
 # ---------------------------------------------------------------------
-#  CRAFTING TABLE  (same dupe vector: filled map + empty maps = clones)
-#  Blocked if any ingredient in the grid is a locked map.
+#  CRAFTING TABLE  (filled map + empty maps = clones: same dupe vector)
 # ---------------------------------------------------------------------
 on craft:
     set {_grid::*} to event-inventory.getMatrix()
-    set {_locked} to false
     loop {_grid::*}:
-        if isLockedMap(loop-value) is true:
-            set {_locked} to true
-    {_locked} is true
-    player does not have permission "quicklogin.maps.dupebypass"
-    cancel event
-    send action bar "&c&lLocked map art can't be copied." to player
+        isLockedMap(loop-value) is true
+        player doesn't have permission "{@bypass-perm}"
+        cancel event
+        send action bar "&c&lLocked map art can't be copied." to player
+        stop
+
+
+# ---------------------------------------------------------------------
+#  DIAGNOSTIC:  /maptest  - hold a map and run this.
+#  Tells you if skript-reflect works and whether the map reads as locked.
+# ---------------------------------------------------------------------
+command /maptest:
+    permission: {@bypass-perm}
+    trigger:
+        set {_view} to mapViewOf(player's tool)
+        if {_view} is not set:
+            send "&eHeld item is not a filled map (no map view found)." to player
+            stop
+        send "&aMap view found  ->  locked = &f%{_view}.isLocked()%" to player
