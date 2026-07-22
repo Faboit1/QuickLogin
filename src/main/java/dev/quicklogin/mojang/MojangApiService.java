@@ -25,7 +25,7 @@ public final class MojangApiService {
             "https://sessionserver.mojang.com/session/minecraft/hasJoined";
 
     private final Logger logger;
-    private final boolean debug;
+    private volatile boolean debug;
     private final Duration timeout;
     private final long cacheMillis;
     private final HttpClient http;
@@ -120,6 +120,11 @@ public final class MojangApiService {
 
     public void clearCache() {
         cache.clear();
+    }
+
+    /** Refresh the debug flag on config reload. */
+    public void setDebug(boolean debug) {
+        this.debug = debug;
     }
 
     /** Convert Mojang's un-dashed 32-char UUID into a {@link UUID}. */

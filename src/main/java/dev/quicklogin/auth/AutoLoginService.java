@@ -42,7 +42,7 @@ public final class AutoLoginService {
 
     private final Plugin plugin;
     private final Logger logger;
-    private final QuickLoginConfig config;
+    private volatile QuickLoginConfig config;
     private final Database db;
     private final AuthMeHook authme;
     private final FloodgateHook floodgate;   // may be null
@@ -63,6 +63,11 @@ public final class AutoLoginService {
         this.premium = premium;
         this.proxyMode = proxyMode;
         this.mojang = mojang;
+    }
+
+    /** Apply a freshly reloaded config to this live service. */
+    public void updateConfig(QuickLoginConfig config) {
+        this.config = config;
     }
 
     public void onJoin(Player player) {

@@ -40,6 +40,8 @@ public final class QuickLoginPlugin extends JavaPlugin {
     private PremiumHandshakeListener premiumListener;
     private MojangApiService mojang;
     private boolean proxyMode;
+    private AutoLoginService autoLogin;
+    private PreLoginListener preLoginListener;
 
     @Override
     public void onEnable() {
@@ -96,12 +98,12 @@ public final class QuickLoginPlugin extends JavaPlugin {
         }
 
         // --- Auto-login + listeners ---
-        AutoLoginService autoLogin = new AutoLoginService(
+        this.autoLogin = new AutoLoginService(
                 this, config, database, authme, floodgate, premiumVerifier, behindProxy, mojang);
+        this.preLoginListener = new PreLoginListener(this, config, floodgate, preJoinHook,
+                premiumVerifier, behindProxy, mojang);
         getServer().getPluginManager().registerEvents(new JoinListener(autoLogin), this);
-        getServer().getPluginManager().registerEvents(
-                new PreLoginListener(this, config, floodgate, preJoinHook, premiumVerifier,
-                        behindProxy, mojang), this);
+        getServer().getPluginManager().registerEvents(preLoginListener, this);
 
         QuickLoginCommand command = new QuickLoginCommand(this);
         if (getCommand("quicklogin") != null) {
@@ -235,9 +237,25 @@ public final class QuickLoginPlugin extends JavaPlugin {
         return mojang;
     }
 
+    /**
+     * Reload config.yml and push the new settings into the live services so
+     * changes take effect without a restart. Note: a few construction-time
+     * settings (proxy mode, Mojang timeout/cache size, PacketEvents handshake)
+     * still require a full server restart to change.
+     */
     public void reloadPluginConfig() {
         reloadConfig();
         this.config = QuickLoginConfig.from(getConfig());
+        if (autoLogin != null) {
+            autoLogin.updateConfig(config);
+        }
+        if (preLoginListener != null) {
+            preLoginListener.updateConfig(config);
+        }
+        if (mojang != null) {
+            mojang.setDebug(config.debug());
+            mojang.clearCache();
+        }
     }
 
     /**

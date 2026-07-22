@@ -34,7 +34,7 @@ public final class PreLoginListener implements Listener {
 
     private final Plugin plugin;
     private final Logger logger;
-    private final QuickLoginConfig config;
+    private volatile QuickLoginConfig config;
     private final FloodgateHook floodgate;         // may be null
     private final AuthMeInternalHook preJoinHook;
     private final dev.quicklogin.premium.PremiumVerifier premium;
@@ -52,6 +52,11 @@ public final class PreLoginListener implements Listener {
         this.premium = premium;
         this.proxyMode = proxyMode;
         this.mojang = mojang;
+    }
+
+    /** Apply a freshly reloaded config to this live listener. */
+    public void updateConfig(QuickLoginConfig config) {
+        this.config = config;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

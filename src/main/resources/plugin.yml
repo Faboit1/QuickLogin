@@ -17,8 +17,8 @@ softdepend:
 
 commands:
   quicklogin:
-    description: QuickLogin admin commands (reload, status, password reset).
-    usage: /quicklogin <reload|status|reset <player>>
+    description: QuickLogin admin commands (reload, status, password reset, premium check).
+    usage: /quicklogin <reload|status|reset <player>|check <name>>
     aliases: [ql]
     permission: quicklogin.admin
 
