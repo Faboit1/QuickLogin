@@ -1,0 +1,139 @@
+# =============================================================================
+#  viewec.sk  —  Admin ender-chest viewer/editor for Purpur (up to 6 rows)
+# =============================================================================
+#
+#  /viewec <player>
+#     Opens ANY player's ender chest so an admin can view it and add / remove
+#     items. Changes are written straight to the real ender chest, so they
+#     persist. Works for online AND offline players.
+#
+#  Permission:  viewenderchest   (deny by default — grant it to your admins)
+#
+#  Requirements
+#  ------------
+#    * Skript
+#    * skript-reflect            (offline players + guaranteeing the live inv)
+#    * Purpur / Paper 1.20.5 – 1.21.x   (runtime Mojang mappings)
+#    * SkBee is NOT required.
+#
+#  Purpur 6-row ender chests
+#  -------------------------
+#  This script opens the player's REAL ender chest, so its size is whatever
+#  Purpur gives that player. To make ender chests 6 rows, set in purpur.yml:
+#
+#     settings:
+#       blocks:                      # (path may read `world-settings` -> `default`)
+#         ...
+#       gameplay-mechanics:
+#         ender_chest:
+#           six-rows: true                 # everyone gets 6 rows
+#           use-permissions-for-rows: false
+#
+#  (If you use `use-permissions-for-rows: true`, rows come from the node
+#   purpur.enderchest.rows.<1-6>. Offline players are sized by the config
+#   default in that case, so `six-rows: true` is the reliable way to get the
+#   full 6 rows for everyone, online or offline.)
+# =============================================================================
+
+import:
+    org.bukkit.Bukkit
+    org.bukkit.metadata.FixedMetadataValue
+    com.mojang.authlib.GameProfile
+    # --- NMS (Mojang runtime mappings; Purpur/Paper 1.20.5+) ---
+    net.minecraft.server.level.ServerPlayer
+    net.minecraft.server.level.ClientInformation
+    org.bukkit.craftbukkit.inventory.CraftInventory
+
+command /viewec <offline player>:
+    description: Open and edit any player's Purpur ender chest.
+    usage: /viewec <player>
+    permission: viewenderchest
+    permission message: &cYou don't have permission to do that. (viewenderchest)
+    executable by: players
+    trigger:
+        set {_target} to arg-1
+        if {_target} is not set:
+            send "&cUnknown player." to player
+            stop
+
+        # ---------- ONLINE: open the live ender chest directly ----------
+        if {_target} is online:
+            set {_uuid} to {_target}.getUniqueId()
+            set {_inv} to Bukkit.getPlayer({_uuid}).getEnderChest()
+            open {_inv} to player
+            send "&aOpened &e%{_target}%&a's ender chest &7(live, changes save instantly)&a." to player
+            stop
+
+        # ---------- OFFLINE: load via NMS, edit, save on close ----------
+        if {_target} has not played before:
+            send "&c%{_target}% has never joined this server." to player
+            stop
+
+        # Refuse to load the same offline player twice at once (avoids a
+        # last-writer-wins data race between two admins).
+        if {viewec-locked::%{_target}.getUniqueId()%} is set:
+            send "&cSomeone is already editing that player's offline ender chest." to player
+            stop
+
+        set {_uuid} to {_target}.getUniqueId()
+        set {_name} to {_target}.getName()
+
+        # Build a throwaway ServerPlayer, load its saved data (this reads the
+        # EnderItems NBT into a real ender-chest container), wrap that
+        # container as a Bukkit inventory, and open it.
+        set {_nmsServer} to Bukkit.getServer().getServer()
+        set {_level} to {_nmsServer}.overworld()
+        set {_profile} to new GameProfile({_uuid}, {_name})
+        set {_client} to ClientInformation.createDefault()
+        set {_sp} to new ServerPlayer({_nmsServer}, {_level}, {_profile}, {_client})
+
+        {_nmsServer}.getPlayerList().load({_sp})
+
+        set {_container} to {_sp}.getEnderChestInventory()
+        set {_inv} to new CraftInventory({_container})
+
+        # Stash the loaded ServerPlayer on the admin (metadata isn't serialized
+        # by Skript, so NMS objects are safe here) so `on inventory close` can
+        # save it back.
+        set {_plugin} to Bukkit.getPluginManager().getPlugin("Skript")
+        player.setMetadata("viewec_sp", new FixedMetadataValue({_plugin}, {_sp}))
+        player.setMetadata("viewec_server", new FixedMetadataValue({_plugin}, {_nmsServer}))
+        player.setMetadata("viewec_name", new FixedMetadataValue({_plugin}, {_name}))
+        player.setMetadata("viewec_uuid", new FixedMetadataValue({_plugin}, "%{_uuid}%"))
+
+        set {viewec-locked::%{_uuid}%} to true
+
+        open {_inv} to player
+        send "&aOpened &e%{_name}%&a's &7(offline)&a ender chest &7— changes save when you close it&a." to player
+
+
+on inventory close:
+    player.hasMetadata("viewec_sp") is true
+
+    set {_sp} to player.getMetadata("viewec_sp").get(0).value()
+    set {_server} to player.getMetadata("viewec_server").get(0).value()
+    set {_name} to player.getMetadata("viewec_name").get(0).value()
+    set {_uuid} to player.getMetadata("viewec_uuid").get(0).value()
+    set {_plugin} to Bukkit.getPluginManager().getPlugin("Skript")
+
+    # Write the (possibly edited) ender chest back to the player's .dat file.
+    {_server}.getPlayerList().save({_sp})
+
+    player.removeMetadata("viewec_sp", {_plugin})
+    player.removeMetadata("viewec_server", {_plugin})
+    player.removeMetadata("viewec_name", {_plugin})
+    player.removeMetadata("viewec_uuid", {_plugin})
+    delete {viewec-locked::%{_uuid}%}
+
+    send "&aSaved &e%{_name}%&a's offline ender chest." to player
+
+
+# Safety net: if the admin logs out with an offline ender chest still open,
+# flush + release the lock so the player never gets stuck as "locked".
+on quit:
+    player.hasMetadata("viewec_sp") is true
+    set {_sp} to player.getMetadata("viewec_sp").get(0).value()
+    set {_server} to player.getMetadata("viewec_server").get(0).value()
+    set {_uuid} to player.getMetadata("viewec_uuid").get(0).value()
+    {_server}.getPlayerList().save({_sp})
+    delete {viewec-locked::%{_uuid}%}
