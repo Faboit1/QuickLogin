@@ -75,17 +75,13 @@ public final class PreLoginListener implements Listener {
                 && (floodgate != null
                     ? floodgate.isBedrockPlayer(uuid)
                     : FloodgateHook.hasFloodgateUuid(uuid));
+        // SECURITY: only approve players whose identity is cryptographically proven
+        // (verified v4 UUID from an online-mode proxy, or our own PacketEvents
+        // handshake). A Mojang API name lookup does NOT prove ownership behind an
+        // offline-mode proxy, so it must never gate a pre-join approval — otherwise
+        // a cracked client could be waved past the dialog onto a premium account.
         boolean verifiedPremium = config.premiumEnabled()
                 && (uuid.version() == 4 || premium.isVerified(name));
-
-        // Proxy mode: this event runs async, so a blocking Mojang API check is safe
-        if (!bedrock && !verifiedPremium && proxyMode && config.premiumEnabled() && mojang != null) {
-            MojangApiService.Result result = mojang.lookup(name);
-            verifiedPremium = result == MojangApiService.Result.PREMIUM;
-            if (config.debug()) {
-                logger.info("Pre-login proxy check for '" + name + "': " + result);
-            }
-        }
 
         if (!bedrock && !verifiedPremium) {
             return;

@@ -80,45 +80,36 @@ public final class AutoLoginService {
                     ? floodgate.isBedrockPlayer(player)
                     : FloodgateHook.hasFloodgateUuid(uuid));
 
+        // A player counts as premium ONLY when their identity was cryptographically
+        // proven: either the network verified them (real version-4 Mojang UUID,
+        // i.e. an online-mode proxy/forwarding) or QuickLogin's own PacketEvents
+        // handshake verified them in standalone mode.
+        //
+        // SECURITY: behind an OFFLINE-mode proxy there is NO way to prove ownership
+        // of a premium name — a Mojang API name lookup only says the name is paid,
+        // not that this client owns it. Auto-logging on a name match let any cracked
+        // client take over a premium account by simply using its name. That path is
+        // removed; such players fall through to AuthMe's normal /login.
         boolean isPremium = !bedrock
                 && config.premiumEnabled()
                 && (uuid.version() == 4 || this.premium.isVerified(name));
-
-        // In proxy mode we may need an async Mojang API lookup to detect premium
-        boolean needsProxyCheck = !bedrock && !isPremium
-                && proxyMode && config.premiumEnabled() && mojang != null;
 
         if (config.debug()) {
             logger.info("Join '" + name + "': uuid=" + uuid + " (v" + uuid.version() + "), "
                     + "floodgate=" + bedrock
                     + ", verified=" + this.premium.isVerified(name)
                     + ", proxyMode=" + proxyMode
-                    + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM"
-                            : needsProxyCheck ? "proxy check" : "cracked (ignored)"));
+                    + " -> " + (bedrock ? "BEDROCK" : isPremium ? "PREMIUM" : "not verified (AuthMe)"));
         }
 
-        if (!bedrock && !isPremium && !needsProxyCheck) {
+        if (!bedrock && !isPremium) {
             return;
         }
 
-        final boolean premiumFlag = isPremium;
-
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            boolean finalPremium = premiumFlag;
-
-            if (needsProxyCheck) {
-                MojangApiService.Result result = mojang.lookup(name);
-                finalPremium = result == MojangApiService.Result.PREMIUM;
-                logger.info("Proxy premium check for '" + name + "': " + result
-                        + (finalPremium ? " → will auto-login" : " → leaving to AuthMe"));
-                if (!finalPremium) {
-                    return;
-                }
-            }
-
             final String type = bedrock ? "Bedrock" : "premium";
             final String uuidStr = uuid.toString();
-            final boolean storedPremium = finalPremium;
+            final boolean storedPremium = isPremium;
 
             long now = System.currentTimeMillis();
             PlayerData existing = db.find(lower);
